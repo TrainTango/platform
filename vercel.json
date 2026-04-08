@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/api/stations", "destination": "/api/stations" },
+    { "source": "/api/departures", "destination": "/api/departures" },
+    { "source": "/api/service", "destination": "/api/service" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
