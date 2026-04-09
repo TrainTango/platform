@@ -250,10 +250,10 @@ function getCSS(dark) {
   .plat-badge{min-width:54px;height:54px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;letter-spacing:-.5px;padding:0 6px;font-variant-numeric:tabular-nums;position:relative}
   .plat-badge-icon{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;border:2px solid var(--bg)}
   .plat-icon-confirmed{background:#2d6a4f;color:#e8f5ec}
-  .plat-icon-changed{background:#8b5a3c;color:#fde8d8}
+  .plat-icon-changed{background:#9e5a6e;color:#fce8ee}
   .plat-icon-expected{background:var(--border-light);color:var(--text-muted)}
   .plat-confirmed{background:#2d6a4f;color:#e8f5ec;box-shadow:0 1px 4px rgba(0,0,0,.1)}
-  .plat-changed{background:#8b5a3c;color:#fde8d8;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .plat-changed{background:#9e5a6e;color:#fce8ee;box-shadow:0 1px 4px rgba(0,0,0,.1)}
   .plat-expected{background:transparent;color:var(--text-muted);border:2px solid var(--border-light);font-size:20px}
   .plat-unknown{background:var(--bg-input);color:var(--text-dim);border:2px dashed var(--border-light);font-size:18px}
   .plat-cancelled{background:var(--bg-input);color:var(--text-dim);border:1.5px solid var(--border);font-size:12px;font-weight:700;opacity:.6}
@@ -266,7 +266,7 @@ function getCSS(dark) {
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
   .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
   .tip-platform{background:rgba(45,106,79,.06);border:1px solid rgba(45,106,79,.15)}
-  .tip-platform-changed{background:rgba(139,90,60,.08);border:1px solid rgba(139,90,60,.2)}
+  .tip-platform-changed{background:rgba(158,90,110,.08);border:1px solid rgba(158,90,110,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
   .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
   .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
@@ -292,7 +292,7 @@ function getCSS(dark) {
   .legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);font-weight:500}
   .legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
   .legend-dot-confirmed{background:#2d6a4f}
-  .legend-dot-changed{background:#8b5a3c}
+  .legend-dot-changed{background:#9e5a6e}
   .legend-dot-expected{border:2px solid var(--border-light);background:transparent}
   .legend-dot-unknown{border:2px dashed var(--border-light);background:transparent}
 
