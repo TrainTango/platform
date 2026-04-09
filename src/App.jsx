@@ -392,7 +392,7 @@ function getCSS(dark) {
   .donate-fab{position:fixed;bottom:24px;right:max(20px,calc((100vw - 480px) / 2 + 20px));width:44px;height:44px;border-radius:50%;background:#5F7FFF;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;z-index:90;box-shadow:0 4px 20px rgba(95,127,255,.45);transition:transform .2s,box-shadow .2s}
   .donate-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(95,127,255,.55)}
   .donate-fab:active{transform:scale(.95)}
-  .donate-tooltip{position:fixed;bottom:78px;right:max(20px,calc((100vw - 480px) / 2 + 20px));background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:13px;color:var(--text);max-width:210px;box-shadow:0 4px 16px var(--shadow);z-index:89;animation:toastIn .3s ease-out;line-height:1.4}
+  .donate-tooltip{position:fixed;bottom:96px;right:max(20px,calc((100vw - 480px) / 2 + 20px));background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:13px;color:var(--text);max-width:210px;box-shadow:0 4px 16px var(--shadow);z-index:89;animation:toastIn .3s ease-out;line-height:1.4}
   .donate-tooltip::after{content:'';position:absolute;bottom:-7px;right:14px;width:12px;height:12px;background:var(--bg-card);border-right:1px solid var(--border);border-bottom:1px solid var(--border);transform:rotate(45deg)}
   .donate-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeOverlay .2s ease-out}
   .donate-panel{width:100%;max-width:480px;background:var(--bg-card);border-radius:20px 20px 0 0;padding:12px 20px 40px;animation:slideUp .28s cubic-bezier(.32,1.1,.5,1);max-height:90vh;overflow-y:auto}
