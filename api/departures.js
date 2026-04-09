@@ -27,23 +27,30 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
 
-    // First check what entitlements we have
-    const infoRes = await fetch(`${RTT_BASE}/api/info`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const info = await infoRes.json();
+    // Test three different URL formats
+    const urls = [
+      `${RTT_BASE}/gb-nr/location?code=${code}`,
+      `${RTT_BASE}/gb-nr/location?code=WATRLMN`,
+      `${RTT_BASE}/rtt/location?code=gb-nr:${code}`,
+    ];
 
-    // Try generic endpoint instead of gb-nr
-    const rttRes = await fetch(`${RTT_BASE}/rtt/location?code=${code}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const rttData = rttRes.status === 204 ? { services: [] } : await rttRes.json();
+    const results = [];
+    for (const url of urls) {
+      const r = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await r.text();
+      let body;
+      try { body = JSON.parse(text); } catch { body = text; }
+      results.push({
+        url: url.replace(RTT_BASE, ''),
+        status: r.status,
+        hasServices: body?.services?.length || 0,
+        sample: typeof body === 'object' ? body : text.slice(0, 200),
+      });
+    }
 
-    return res.status(200).json({
-      debug_info: info,
-      debug_rtt_status: rttRes.status,
-      ...rttData
-    });
+    return res.status(200).json({ results });
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }
