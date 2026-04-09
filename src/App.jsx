@@ -4,15 +4,17 @@ const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
 // ── Seating Guidance (tiered by confidence) ──
+const HINT_SUFFIX = " Once on board, look for seats without a reserved ticket in the headrest — or ask a member of train staff who can point you to unreserved seats.";
+
 const COACH_GUIDANCE = {
   "LNER": { confidence: "high", coaches: "C", tip: "Coach C is always the unreserved coach on LNER. It's towards the north end on 9/10-car Azumas, or mid-train on 5-car services.", cardLabel: "Unreserved: C" },
-  "Avanti West Coast": { confidence: "hint", coaches: "C", tip: "Coach C is often unreserved. On 11-car Pendolinos, Coach U may also be unreserved. Coach G on refurbished trains is also unreserved. This can vary — check platform displays.", cardLabel: "Often unreserved: C" },
-  "CrossCountry": { confidence: "hint", coaches: "B or D", tip: "On 5 or 9-coach trains, Coach B is usually unreserved. On 4 or 8-coach trains, some seats in Coach D are unreserved. This changed in June 2024 — check platform displays.", cardLabel: "Often unreserved: B" },
-  "Great Western Railway": { confidence: "hint", coaches: "G", tip: "Coach G is usually unreserved on London services. Non-London services are fully unreserved. This can vary — check platform displays.", cardLabel: "Often unreserved: G" },
-  "East Midlands Railway": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on London services. Non-London services and Corby 'Connect' services are fully unreserved.", cardLabel: "Often unreserved: D" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", tip: "Coach C is often unreserved. On 11-car Pendolinos, Coach U may also be unreserved. Coach G on refurbished trains is also unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: C" },
+  "CrossCountry": { confidence: "hint", coaches: "B or D", tip: "On 5 or 9-coach trains, Coach B is usually unreserved. On 4 or 8-coach trains, some seats in Coach D are unreserved. This changed in June 2024." + HINT_SUFFIX, cardLabel: "Often unreserved: B" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", tip: "Coach G is usually unreserved on London services. Non-London services are fully unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: G" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on London services. Non-London services and Corby 'Connect' services are fully unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: D" },
   "Hull Trains": { confidence: "high", coaches: "A", tip: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "Unreserved: A" },
-  "TransPennine Express": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on Nova trains. On Class 185 trains, some seats in Coaches A and B are unreserved. This can vary.", cardLabel: "Often unreserved: D" },
-  "Grand Central": { confidence: "hint", coaches: "B", tip: "Part of Coach B is usually unreserved on Sunderland services. On Bradford services, unreserved seats are spread throughout.", cardLabel: "Partially unreserved: B" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on Nova trains. On Class 185 trains, some seats in Coaches A and B are unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: D" },
+  "Grand Central": { confidence: "hint", coaches: "B", tip: "Part of Coach B is usually unreserved on Sunderland services. On Bradford services, unreserved seats are spread throughout." + HINT_SUFFIX, cardLabel: "Partially unreserved: B" },
 };
 
 const NO_RESERVATION_OPERATORS = new Set([
@@ -26,7 +28,7 @@ const NO_RESERVATION_OPERATORS = new Set([
 
 const COMPULSORY_RESERVATION = new Set(["Caledonian Sleeper"]);
 
-const LUMO_GUIDANCE = { confidence: "hint", tip: "Lumo has very limited unreserved seats, marked with a green light. There is no dedicated unreserved coach.", cardLabel: "Limited unreserved" };
+const LUMO_GUIDANCE = { confidence: "hint", tip: "Lumo has very limited unreserved seats, marked with a green light above them. There is no dedicated unreserved coach. Ask a member of staff on board if you need help finding one.", cardLabel: "Limited unreserved" };
 
 // ── Recent Stations ──
 function getRecent() {
