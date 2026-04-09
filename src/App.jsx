@@ -3,6 +3,25 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
+// ── Analytics ──
+function getVisitorId() {
+  try {
+    let id = localStorage.getItem("platform_visitor");
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem("platform_visitor", id); }
+    return id;
+  } catch { return "unknown"; }
+}
+
+function trackEvent(type, data) {
+  try {
+    fetch(`${API_BASE}/analytics`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, visitor_id: getVisitorId(), ...data }),
+    }).catch(() => {});
+  } catch {}
+}
+
 // ── Seating Guidance ──
 const COACH_GUIDANCE = {
   "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
@@ -182,6 +201,7 @@ function getPlatformMessage(userService, allServices) {
   const hasActualDep = !!dep?.realtimeActual;
   if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "\uD83D\uDE86", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
 
+  // Confirmed by signalling — departure status only (not arrival, avoids terminus false positives)
   const confirmed = departureStatus === "ARRIVING" || departureStatus === "AT_PLATFORM" || departureStatus === "DEPART_PREPARING" || departureStatus === "DEPART_READY";
 
   if (confirmed) {
@@ -194,6 +214,7 @@ function getPlatformMessage(userService, allServices) {
     };
   }
 
+  // Likely here — within 3 minutes but no signalling confirmation yet
   const effective = dep?.realtimeForecast || dep?.scheduleAdvertised;
   const minsOut = effective ? Math.round((new Date(effective) - new Date()) / 60000) : null;
   const likelyHere = minsOut !== null && minsOut <= 3;
@@ -207,6 +228,7 @@ function getPlatformMessage(userService, allServices) {
     };
   }
 
+  // Platform occupied by a different service
   const { occupied } = checkPlatformOccupancy(userService, allServices);
   if (occupied) {
     return {
@@ -216,6 +238,7 @@ function getPlatformMessage(userService, allServices) {
     };
   }
 
+  // Default: confirmed platform, clear, train not imminent
   return {
     title: isChanged ? `Platform changed to ${platNum} \u2014 head there now` : `Platform ${platNum} confirmed \u2014 head there now`,
     description: "Get there early and be first to board.",
@@ -302,16 +325,17 @@ function getCSS(dark) {
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
   .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
-  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:62px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
+  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
 
-  .countdown-col{display:flex;flex-direction:column;align-items:flex-start;min-width:52px;gap:1px}
-  .countdown-time{font-size:19px;font-weight:800;letter-spacing:-.5px;line-height:1;font-variant-numeric:tabular-nums;color:var(--text)}
-  .countdown-mins{font-size:11px;font-weight:600;color:var(--text-dim);line-height:1;margin-top:3px}
-  .countdown-due{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--green);padding:2px 6px;border-radius:5px;margin-top:3px;line-height:1.4;letter-spacing:.2px}
+  .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+  .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
+  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
+  .countdown-time{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;margin-top:2px}
 
   .info-col{display:flex;flex-direction:column;gap:3px;min-width:0}
   .dest-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
@@ -344,13 +368,13 @@ function getCSS(dark) {
   .plat-status-unknown{color:var(--text-dim)}
 
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
-  .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center}
+  .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
   .tip-platform{background:rgba(45,106,79,.06);border:1px solid rgba(45,106,79,.15)}
   .tip-platform-changed{background:rgba(232,98,58,.08);border:1px solid rgba(232,98,58,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
   .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
   .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
-  .tip-icon{font-size:16px;flex-shrink:0}
+  .tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
   .tip-content{display:flex;flex-direction:column;gap:2px}
   .tip-title{font-size:12px;font-weight:700;color:var(--text)}
   .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
@@ -361,6 +385,11 @@ function getCSS(dark) {
   .tip-report{font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline;background:none;border:none;font-family:inherit;padding:0}
   .tip-report:hover{opacity:.7}
   .tip-peak{font-size:11px;color:var(--amber);font-weight:600;margin-top:2px}
+
+  .feedback-btn{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.15);border-radius:8px;padding:8px 12px;cursor:pointer;transition:background .15s;width:100%}
+  .feedback-btn:hover{background:rgba(16,185,129,.15)}
+  .feedback-btn-done{background:rgba(16,185,129,.15);border-color:rgba(16,185,129,.3);cursor:default}
+  .feedback-text{font-size:12px;font-weight:600;color:var(--green)}
 
   .detail-row{display:flex;gap:16px;flex-wrap:wrap}
   .detail-item{display:flex;flex-direction:column;gap:1px}
@@ -398,8 +427,9 @@ const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 
 // ── Components ──
-function DepartureCard({ svc, allServices }) {
+function DepartureCard({ svc, allServices, stationCode }) {
   const [expanded, setExpanded] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const status = getStatus(svc);
   const plat = getPlatform(svc);
   const dest = getDestination(svc);
@@ -420,11 +450,11 @@ function DepartureCard({ svc, allServices }) {
     <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
       onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
       <div className="countdown-col">
-        <span className="countdown-time">{fmtTime(scheduled)}</span>
-        {mins === 0 ? (
+        <span className="countdown-num">{fmtTime(scheduled)}</span>
+        {mins !== null && mins > 0 ? (
+          <span className="countdown-unit">{mins} min</span>
+        ) : mins === 0 ? (
           <span className="countdown-due">Due</span>
-        ) : mins !== null && mins > 0 ? (
-          <span className="countdown-mins">{mins} min</span>
         ) : null}
       </div>
 
@@ -457,6 +487,7 @@ function DepartureCard({ svc, allServices }) {
 
       {expanded && (
         <div className="expanded-area">
+          {/* Platform guidance — data-driven */}
           {platMsg.tier !== "unknown" && (
             <div className={`tip-card ${platMsg.tipClass}`}>
               <span className="tip-icon">{platMsg.icon}</span>
@@ -467,6 +498,7 @@ function DepartureCard({ svc, allServices }) {
             </div>
           )}
 
+          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
             <div className="tip-card tip-coach">
               <span className="tip-icon">{"\uD83D\uDCBA"}</span>
@@ -512,6 +544,25 @@ function DepartureCard({ svc, allServices }) {
               </div>
             </div>
           )}
+
+          {/* Feedback */}
+          <div className={`feedback-btn ${feedbackSent ? "feedback-btn-done" : ""}`} role="button" tabIndex={0}
+            onClick={e => {
+              e.stopPropagation();
+              if (feedbackSent) return;
+              setFeedbackSent(true);
+              trackEvent("feedback", {
+                station_code: stationCode || "",
+                destination: dest,
+                operator,
+                platform: plat.text,
+                platform_tier: plat.tier,
+                seating_guidance: guidance?.cardLabel || (isNoReservation ? "No reservations" : ""),
+              });
+            }}>
+            <span>{feedbackSent ? "\u2705" : "\uD83D\uDC4D"}</span>
+            <span className="feedback-text">{feedbackSent ? "Thanks for the feedback!" : "This helped"}</span>
+          </div>
 
           {cancelReason && <div className="cancel-reason">Reason: {cancelReason}</div>}
 
@@ -581,7 +632,7 @@ export default function App() {
   const pctRef = useRef(null);
   const inputRef = useRef(null);
 
-  useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); }, []);
+  useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); trackEvent("page_view"); }, []);
 
   useEffect(() => {
     clockRef.current = setInterval(() => {
@@ -640,6 +691,7 @@ export default function App() {
     setStation(s); setQuery(""); setShowDrop(false);
     saveRecent(s); setRecent(getRecent());
     prevDepsRef.current = null;
+    trackEvent("station_search", { station_code: s.code, station_name: s.name });
     setScreen("board"); loadDepartures(s.code);
   }, [loadDepartures]);
 
@@ -768,7 +820,7 @@ export default function App() {
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs}/>)}
+                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={station?.code}/>)}
                 </div>
               </>
             )}
