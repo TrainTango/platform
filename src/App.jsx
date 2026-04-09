@@ -3,15 +3,28 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
-// ── Unreserved Coach Guidance (curated by operator) ──
+// ── Unreserved Coach Guidance ──
 const COACH_GUIDANCE = {
-  "LNER": { coaches: "C & U", tip: "Coaches C and U are unreserved. Head to the middle of the train for Coach C." },
-  "Avanti West Coast": { coaches: "A & L", tip: "Coaches A and L are typically unreserved. Coach A is at the rear of the train." },
-  "CrossCountry": { coaches: "A", tip: "Coach A is usually unreserved and located at the rear of the train." },
-  "Great Western Railway": { coaches: "C & L", tip: "Coaches C and L are often unreserved on GWR intercity services." },
-  "TransPennine Express": { coaches: "A & B", tip: "Coaches A and B are typically unreserved on TransPennine services." },
-  "East Midlands Railway": { coaches: "A & B", tip: "Coaches A and B are usually unreserved on EMR intercity services." },
+  "LNER": { coaches: "C & U", tip: "Coaches C and U are unreserved. Coach C is usually mid-train." },
+  "Avanti West Coast": { coaches: "A & L", tip: "Coaches A and L are typically unreserved. Coach A is at the rear." },
+  "CrossCountry": { coaches: "A", tip: "Coach A is usually unreserved, located at the rear." },
+  "Great Western Railway": { coaches: "C & L", tip: "Coaches C and L are often unreserved on intercity services." },
+  "TransPennine Express": { coaches: "A & B", tip: "Coaches A and B are typically unreserved." },
+  "East Midlands Railway": { coaches: "A & B", tip: "Coaches A and B are usually unreserved on intercity services." },
 };
+
+// ── Recent Stations (persisted) ──
+function getRecent() {
+  try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
+  catch { return []; }
+}
+function saveRecent(station) {
+  try {
+    let r = getRecent().filter(s => s.code !== station.code);
+    r.unshift(station);
+    localStorage.setItem("platform_recent", JSON.stringify(r.slice(0, 3)));
+  } catch {}
+}
 
 // ── API ──
 async function fetchStations() {
@@ -31,13 +44,10 @@ async function fetchDepartures(code) {
   const r = await fetch(`${API_BASE}/departures?code=${code}`);
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
-  // Filter to departures only — exclude terminating services
   if (data.services) {
     data.services = data.services.filter(svc => {
       const dep = svc.temporalData?.departure;
-      if (!dep) return false;
-      if (!dep.scheduleAdvertised) return false;
-      return true;
+      return dep && dep.scheduleAdvertised;
     });
   }
   return data;
@@ -46,22 +56,27 @@ async function fetchDepartures(code) {
 // ── Helpers ──
 function fmtTime(iso) {
   if (!iso) return "--:--";
-  const d = new Date(iso);
-  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function minsUntil(iso) {
   if (!iso) return null;
   const diff = Math.round((new Date(iso) - new Date()) / 60000);
-  if (diff < 0) return null;
-  return diff;
+  return diff < 0 ? null : diff;
 }
 
-function minsLabel(mins) {
-  if (mins === null) return "";
-  if (mins <= 0) return "Due";
-  if (mins === 1) return "1 min";
-  return `${mins} min`;
+function minsLabel(m) {
+  if (m === null) return "";
+  if (m <= 0) return "Due";
+  return `${m} min`;
+}
+
+function relativeTime(date) {
+  if (!date) return "";
+  const s = Math.round((Date.now() - date.getTime()) / 1000);
+  if (s < 5) return "Just now";
+  if (s < 60) return `${s}s ago`;
+  return `${Math.floor(s / 60)}m ago`;
 }
 
 function getStatus(svc) {
@@ -76,48 +91,41 @@ function getStatus(svc) {
 function getPlatform(svc) {
   const dep = svc.temporalData?.departure;
   const plat = svc.locationMetadata?.platform;
-  if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "", announced: false };
-  if (!plat) return { text: "\u2014", tier: "unknown", label: "Not yet known", announced: false };
+  if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "Cancelled" };
+  if (!plat) return { text: "\u2014", tier: "unknown", label: "Unknown" };
   if (plat.actual) {
     const changed = plat.planned && plat.actual !== plat.planned;
-    if (changed) return { text: plat.actual, tier: "changed", label: "Platform changed", announced: true };
-    return { text: plat.actual, tier: "confirmed", label: "Confirmed", announced: true };
+    if (changed) return { text: plat.actual, tier: "changed", label: "Changed" };
+    return { text: plat.actual, tier: "confirmed", label: "Confirmed" };
   }
-  if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected \u2014 not yet announced", announced: false };
-  return { text: "\u2014", tier: "unknown", label: "Not yet known", announced: false };
+  if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected" };
+  return { text: "\u2014", tier: "unknown", label: "Unknown" };
 }
 
 function getEffectiveTime(svc) {
   const dep = svc.temporalData?.departure;
   return dep?.realtimeForecast || dep?.realtimeActual || dep?.scheduleAdvertised;
 }
+function getScheduledTime(svc) { return svc.temporalData?.departure?.scheduleAdvertised; }
+function getDestination(svc) { return svc.destination?.[0]?.location?.description || "Unknown"; }
+function getOperator(svc) { return svc.scheduleMetadata?.operator?.name || ""; }
+function nowHHMM() { return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }); }
 
-function getScheduledTime(svc) {
-  return svc.temporalData?.departure?.scheduleAdvertised;
-}
-
-function getDestination(svc) {
-  return svc.destination?.[0]?.location?.description || "Unknown";
-}
-
-function getOperator(svc) {
-  return svc.scheduleMetadata?.operator?.name || "";
-}
-
-function nowHHMM() {
-  return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+// Build a key for platform change detection
+function svcKey(svc) {
+  return `${getDestination(svc)}-${getScheduledTime(svc)}`;
 }
 
 // ── Styles ──
 function getCSS(dark) {
   const t = dark ? {
-    bg: "#090913", bgCard: "#101020", bgCardHover: "#141428", bgInput: "#16162a",
-    text: "#f1f5f9", textMuted: "#94a3b8", textDim: "#475569",
-    border: "#1e1e35", borderLight: "#252542", headerBg: "rgba(9,9,19,.92)",
+    bg:"#090913",bgCard:"#101020",bgCardHover:"#141428",bgInput:"#16162a",
+    text:"#f1f5f9",textMuted:"#94a3b8",textDim:"#6b7280",
+    border:"#1e1e35",borderLight:"#252542",headerBg:"rgba(9,9,19,.92)",shadow:"rgba(0,0,0,.3)"
   } : {
-    bg: "#f5f5f7", bgCard: "#ffffff", bgCardHover: "#f0f0f5", bgInput: "#eeeef2",
-    text: "#1a1a2e", textMuted: "#555570", textDim: "#8888a0",
-    border: "#dddde5", borderLight: "#e5e5ed", headerBg: "rgba(245,245,247,.92)",
+    bg:"#f3f4f6",bgCard:"#ffffff",bgCardHover:"#f9fafb",bgInput:"#e5e7eb",
+    text:"#111827",textMuted:"#4b5563",textDim:"#9ca3af",
+    border:"#d1d5db",borderLight:"#e5e7eb",headerBg:"rgba(243,244,246,.92)",shadow:"rgba(0,0,0,.08)"
   };
 
   return `
@@ -125,119 +133,138 @@ function getCSS(dark) {
   *{margin:0;padding:0;box-sizing:border-box}
   :root{
     --bg:${t.bg};--bg-card:${t.bgCard};--bg-card-hover:${t.bgCardHover};--bg-input:${t.bgInput};
-    --accent:#6366f1;--accent-dim:rgba(99,102,241,0.12);
+    --accent:#6366f1;--accent-dim:rgba(99,102,241,0.1);
     --amber:#f59e0b;--green:#10b981;--red:#ef4444;--orange:#f97316;
     --text:${t.text};--text-muted:${t.textMuted};--text-dim:${t.textDim};
-    --border:${t.border};--border-light:${t.borderLight};--header-bg:${t.headerBg};
+    --border:${t.border};--border-light:${t.borderLight};--header-bg:${t.headerBg};--shadow:${t.shadow};
   }
   body,#root{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .3s,color .3s}
   .app{max-width:480px;margin:0 auto;min-height:100vh;position:relative}
 
-  .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:12vh;min-height:100vh}
-  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1 0%,#818cf8 50%,#a5b4fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
-  .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:28px;letter-spacing:.5px}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* ── Search ── */
+  .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
+  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
+  .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
   .search-wrap{width:100%;position:relative}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
-  .search-input{width:100%;padding:16px 16px 16px 48px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;font-family:inherit;outline:none;transition:all .2s}
+  .search-input{width:100%;padding:16px 16px 16px 48px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
   .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
   .search-input::placeholder{color:var(--text-dim)}
-  .search-hint{color:var(--text-dim);font-size:12px;margin-top:10px;text-align:center}
-  .theme-toggle{position:absolute;top:20px;right:20px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+  .theme-toggle{position:absolute;top:20px;right:20px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;transition:border-color .2s}
   .theme-toggle:hover{border-color:var(--accent)}
 
-  .dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:320px;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.3)}
-  .dropdown-item{padding:13px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border)}
+  .recent-section{width:100%;margin-top:20px}
+  .recent-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .recent-list{display:flex;flex-direction:column;gap:6px}
+  .recent-btn{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:background .15s;min-height:48px}
+  .recent-btn:hover{background:var(--bg-card-hover)}
+  .recent-name{font-size:14px;font-weight:600;color:var(--text)}
+  .recent-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
+
+  .dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:320px;overflow-y:auto;box-shadow:0 12px 40px var(--shadow)}
+  .dropdown-item{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border);min-height:48px}
   .dropdown-item:last-child{border-bottom:none}
   .dropdown-item:hover{background:var(--accent-dim)}
   .dropdown-name{font-size:14px;font-weight:500}
-  .dropdown-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px;letter-spacing:.5px}
+  .dropdown-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
 
+  /* ── Board ── */
   .board-screen{display:flex;flex-direction:column;min-height:100vh}
   .board-header{position:sticky;top:0;z-index:40;background:var(--header-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:12px 16px 0;border-bottom:1px solid var(--border)}
   .header-row1{display:flex;align-items:center;gap:8px}
-  .back-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:6px;border-radius:8px;display:flex;align-items:center;transition:all .2s}
+  .back-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:12px;border-radius:10px;display:flex;align-items:center;min-width:44px;min-height:44px;justify-content:center;transition:all .2s}
   .back-btn:hover{color:var(--text);background:var(--accent-dim)}
   .station-name{font-size:17px;font-weight:800;letter-spacing:-.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .header-clock{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.5px;font-variant-numeric:tabular-nums}
-  .header-row2{display:flex;align-items:center;justify-content:space-between;padding-left:36px;margin-top:3px}
+  .header-clock{font-size:17px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+  .header-row2{display:flex;align-items:center;justify-content:space-between;padding-left:44px;margin-top:3px}
   .header-sub{font-size:11px;color:var(--text-dim)}
   .header-actions{display:flex;align-items:center;gap:6px}
-  .live-pill{display:flex;align-items:center;gap:5px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:3px 10px;border-radius:14px;cursor:pointer;font-size:10px;font-weight:700;color:var(--green);letter-spacing:.8px;text-transform:uppercase;transition:background .2s}
+  .live-pill{display:flex;align-items:center;gap:5px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:4px 12px;border-radius:14px;cursor:pointer;font-size:11px;font-weight:700;color:var(--green);letter-spacing:.5px;text-transform:uppercase;transition:background .2s;min-height:32px}
   .live-pill:hover{background:rgba(16,185,129,.15)}
   .live-dot{width:6px;height:6px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-  .theme-btn-sm{background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:4px 6px;cursor:pointer;display:flex;align-items:center;color:var(--text-muted)}
-  .refresh-bar{height:2px;background:var(--border);overflow:hidden}
+  .theme-btn-sm{background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:6px;cursor:pointer;display:flex;align-items:center;color:var(--text-muted);min-width:32px;min-height:32px;justify-content:center}
+  .refresh-bar{height:3px;background:var(--border);overflow:hidden}
   .refresh-fill{height:100%;background:var(--accent);transition:width 1s linear}
 
-  .card-list{padding:6px 10px 80px;display:flex;flex-direction:column;gap:6px}
+  /* ── Toast ── */
+  .toast-wrap{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:6px;max-width:460px;width:calc(100% - 32px)}
+  .toast{background:var(--orange);color:#fff;padding:12px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:8px;animation:toastIn .3s ease-out}
+  @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+  .toast-icon{font-size:16px;flex-shrink:0}
+  .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
-  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;padding:12px 12px 12px 14px;align-items:center;cursor:pointer;transition:background .15s}
+  /* ── Cards ── */
+  .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
+
+  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
 
-  .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:52px}
-  .countdown-num{font-size:24px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
-  .countdown-due{font-size:18px;font-weight:900;letter-spacing:-.5px;color:var(--green)}
-  .countdown-unit{font-size:10px;font-weight:600;color:var(--text-dim);margin-top:1px}
-  .countdown-time{font-size:10px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;margin-top:2px}
+  .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+  .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
+  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
+  .countdown-time{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;margin-top:2px}
 
-  .info-col{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .info-col{display:flex;flex-direction:column;gap:3px;min-width:0}
   .dest-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
-  .meta-row{display:flex;align-items:center;gap:6px;margin-top:1px;flex-wrap:wrap}
-  .status-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.2px;text-transform:uppercase}
+  .meta-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .status-badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.2px;text-transform:uppercase}
   .status-on-time{background:rgba(16,185,129,.1);color:var(--green)}
   .status-delayed{background:rgba(245,158,11,.1);color:var(--amber)}
   .status-cancelled{background:rgba(239,68,68,.1);color:var(--red)}
-  .operator-name{font-size:10px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+  .coach-pill{font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-dim);padding:2px 7px;border-radius:5px}
+  .operator-name{font-size:11px;color:var(--text-dim)}
 
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
-  .plat-badge{min-width:52px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;letter-spacing:-.5px;padding:0 6px;font-variant-numeric:tabular-nums}
-  .plat-confirmed{background:linear-gradient(140deg,#f59e0b,#d97706);color:#090913;box-shadow:0 0 18px rgba(245,158,11,.3)}
-  .plat-changed{background:linear-gradient(140deg,#f97316,#ea580c);color:#fff;box-shadow:0 0 18px rgba(249,115,22,.35);animation:platPulse 2s ease-in-out infinite}
-  @keyframes platPulse{0%,100%{box-shadow:0 0 18px rgba(249,115,22,.35)}50%{box-shadow:0 0 24px rgba(249,115,22,.55)}}
-  .plat-expected{background:transparent;color:var(--amber);border:2px solid rgba(245,158,11,.35);font-size:20px}
+  .plat-badge{min-width:54px;height:54px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;letter-spacing:-.5px;padding:0 6px;font-variant-numeric:tabular-nums;position:relative}
+  .plat-badge-icon{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;border:2px solid var(--bg)}
+  .plat-icon-confirmed{background:var(--green);color:#fff}
+  .plat-icon-changed{background:var(--orange);color:#fff}
+  .plat-icon-expected{background:var(--text-dim);color:#fff}
+  .plat-confirmed{background:linear-gradient(140deg,#f59e0b,#d97706);color:#090913;box-shadow:0 0 16px rgba(245,158,11,.3)}
+  .plat-changed{background:linear-gradient(140deg,#f97316,#ea580c);color:#fff;box-shadow:0 0 16px rgba(249,115,22,.35);animation:platPulse 2s ease-in-out infinite}
+  @keyframes platPulse{0%,100%{box-shadow:0 0 16px rgba(249,115,22,.35)}50%{box-shadow:0 0 22px rgba(249,115,22,.5)}}
+  .plat-expected{background:transparent;color:var(--amber);border:2.5px solid rgba(245,158,11,.4);font-size:20px}
   .plat-unknown{background:var(--bg-input);color:var(--text-dim);border:2px dashed var(--border-light);font-size:18px}
   .plat-cancelled{background:rgba(239,68,68,.08);color:rgba(239,68,68,.5);border:1.5px solid rgba(239,68,68,.15);font-size:12px;font-weight:700}
-  .plat-status{font-size:8px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;text-align:center;max-width:60px;line-height:1.2}
+  .plat-status{font-size:11px;font-weight:700;letter-spacing:.2px;text-align:center}
   .plat-status-confirmed{color:var(--amber)}
   .plat-status-changed{color:var(--orange)}
   .plat-status-expected{color:var(--text-dim)}
   .plat-status-unknown{color:var(--text-dim)}
-  .plat-status-cancelled{color:var(--red)}
-
-  .early-badge{font-size:8px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:1px 5px;border-radius:3px;letter-spacing:.3px;text-transform:uppercase;margin-top:1px}
 
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
 
-  .coach-tip{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.15);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
-  .coach-icon{font-size:16px;flex-shrink:0;margin-top:1px}
-  .coach-content{display:flex;flex-direction:column;gap:2px}
-  .coach-title{font-size:11px;font-weight:700;color:var(--accent)}
-  .coach-desc{font-size:11px;color:var(--text-muted);line-height:1.4}
-
-  .platform-tip{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
-  .platform-tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
-  .platform-tip-text{font-size:11px;color:var(--text-muted);line-height:1.4}
-  .platform-tip-text strong{color:var(--text);font-weight:600}
+  .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
+  .tip-platform{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15)}
+  .tip-platform-changed{background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2)}
+  .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
+  .tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+  .tip-content{display:flex;flex-direction:column;gap:2px}
+  .tip-title{font-size:12px;font-weight:700;color:var(--text)}
+  .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
 
   .detail-row{display:flex;gap:16px;flex-wrap:wrap}
   .detail-item{display:flex;flex-direction:column;gap:1px}
-  .detail-label{font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+  .detail-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
   .detail-value{font-size:12px;font-weight:600;color:var(--text-muted)}
 
-  .cancel-reason{font-size:11px;color:var(--red);font-weight:500;font-style:italic}
+  .cancel-reason{font-size:12px;color:var(--red);font-weight:500;font-style:italic}
 
-  .legend-toggle{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;font-size:10px;color:var(--text-dim);cursor:pointer;font-weight:600}
-  .legend-toggle:hover{color:var(--text-muted)}
-  .legend{margin:0 10px 6px;padding:12px 14px;background:var(--bg-card);border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-  .legend-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
-  .legend-row{display:flex;align-items:center;gap:10px}
-  .legend-badge{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
-  .legend-desc{font-size:11px;color:var(--text-muted);line-height:1.3}
-  .legend-desc strong{color:var(--text);font-weight:600}
+  /* ── Legend ── */
+  .legend-bar{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 10px;flex-wrap:wrap}
+  .legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);font-weight:500}
+  .legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+  .legend-dot-confirmed{background:linear-gradient(140deg,#f59e0b,#d97706)}
+  .legend-dot-changed{background:linear-gradient(140deg,#f97316,#ea580c)}
+  .legend-dot-expected{border:2px solid rgba(245,158,11,.4);background:transparent}
+  .legend-dot-unknown{border:2px dashed var(--border-light);background:transparent}
 
   .loading-wrap,.error-wrap,.empty-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;text-align:center}
   .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin-bottom:14px}
@@ -247,21 +274,19 @@ function getCSS(dark) {
   .empty-icon{font-size:32px;margin-bottom:10px;opacity:.4}
   .empty-text{color:var(--text-muted);font-size:13px}
 
-  .donate-float{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:6px 14px;display:flex;align-items:center;gap:6px;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.2);transition:all .2s;z-index:50;max-width:480px}
-  .donate-float:hover{border-color:var(--accent);box-shadow:0 4px 24px rgba(99,102,241,.15)}
-  .donate-heart{font-size:14px}
-  .donate-text{font-size:11px;color:var(--text-muted);font-weight:500}
-  .donate-text strong{color:var(--text);font-weight:600}
+  .donate-section{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 20px;margin-top:12px;cursor:pointer;opacity:.6;transition:opacity .2s}
+  .donate-section:hover{opacity:1}
+  .donate-text{font-size:12px;color:var(--text-dim)}
+  .donate-text strong{color:var(--text-muted)}
   `;
 }
 
 // ── Icons ──
 const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
-const BackIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
-const InfoIcon = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
-const AlertIcon = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const LocIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>;
 
 // ── Components ──
 function DepartureCard({ svc }) {
@@ -274,88 +299,81 @@ function DepartureCard({ svc }) {
   const effective = getEffectiveTime(svc);
   const mins = minsUntil(effective);
   const isDelayed = status.key === "delayed";
-  const vehicles = svc.locationMetadata?.numberOfVehicles;
-  const reasons = svc.reasons;
-  const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText
-    || reasons?.find(r => r.type === "DELAY")?.shortText;
   const guidance = COACH_GUIDANCE[operator];
+  const reasons = svc.reasons;
+  const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
 
   return (
-    <div className={`dep-card ${status.key}`} onClick={() => setExpanded(e => !e)}>
+    <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
+      onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
       <div className="countdown-col">
         {mins !== null && mins > 0 ? (
-          <>
-            <span className="countdown-num">{mins}</span>
-            <span className="countdown-unit">min</span>
-          </>
+          <><span className="countdown-num">{mins}</span><span className="countdown-unit">min</span></>
         ) : mins === 0 ? (
           <span className="countdown-due">Due</span>
         ) : (
           <span className="countdown-num" style={{fontSize:16}}>--</span>
         )}
-        <span className="countdown-time">
-          {isDelayed ? fmtTime(effective) : fmtTime(scheduled)}
-        </span>
-        {isDelayed && <span className="countdown-time" style={{textDecoration:"line-through",fontSize:9}}>{fmtTime(scheduled)}</span>}
+        <span className="countdown-time">{fmtTime(scheduled)}</span>
       </div>
 
       <div className="info-col">
         <span className="dest-name">{dest}</span>
         <div className="meta-row">
           <span className={`status-badge status-${status.key}`}>{status.label}</span>
+          {guidance && status.key !== "cancelled" && (
+            <span className="coach-pill" title={guidance.tip}>{"\uD83D\uDCBA"} {guidance.coaches}</span>
+          )}
           <span className="operator-name">{operator}</span>
-          {vehicles && <span className="operator-name">{vehicles} coaches</span>}
         </div>
-        {!plat.announced && plat.tier === "expected" && (
-          <span className="early-badge">Platform not yet announced</span>
-        )}
       </div>
 
       <div className="plat-col">
-        <div className={`plat-badge plat-${plat.tier}`}>{plat.text}</div>
-        <span className={`plat-status plat-status-${plat.tier}`}>
-          {plat.tier === "confirmed" ? "Confirmed" :
-           plat.tier === "changed" ? (<><AlertIcon/> Changed</>) :
-           plat.tier === "expected" ? "Expected" :
-           plat.tier === "cancelled" ? "N/A" : ""}
-        </span>
+        <div className={`plat-badge plat-${plat.tier}`}>
+          {plat.text}
+          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">{"\u2713"}</span>}
+          {plat.tier === "changed" && <span className="plat-badge-icon plat-icon-changed">!</span>}
+          {plat.tier === "expected" && <span className="plat-badge-icon plat-icon-expected">?</span>}
+        </div>
+        <span className={`plat-status plat-status-${plat.tier}`}>{plat.label}</span>
       </div>
 
       {expanded && (
         <div className="expanded-area">
-          {/* Platform confidence tip */}
           {plat.tier === "expected" && (
-            <div className="platform-tip">
-              <span className="platform-tip-icon">{"\uD83D\uDFE1"}</span>
-              <span className="platform-tip-text">
-                <strong>Platform {plat.text} is expected</strong> based on the timetable but hasn't been confirmed yet. This is often correct, but check station boards for last-minute changes.
-              </span>
+            <div className="tip-card tip-platform">
+              <span className="tip-icon">{"\uD83D\uDFE1"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Platform {plat.text} is expected</span>
+                <span className="tip-desc">Based on the timetable. We'll update this to confirmed once live signalling data comes through — stay on this page.</span>
+              </div>
             </div>
           )}
           {plat.tier === "confirmed" && (
-            <div className="platform-tip">
-              <span className="platform-tip-icon">{"\u2705"}</span>
-              <span className="platform-tip-text">
-                <strong>Platform {plat.text} is confirmed</strong> by live signalling data. Head there now.
-              </span>
+            <div className="tip-card tip-platform">
+              <span className="tip-icon">{"\u2705"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Platform {plat.text} is confirmed</span>
+                <span className="tip-desc">Live signalling data — head there now.</span>
+              </div>
             </div>
           )}
           {plat.tier === "changed" && (
-            <div className="platform-tip">
-              <span className="platform-tip-icon">{"\u26A0\uFE0F"}</span>
-              <span className="platform-tip-text">
-                <strong>Platform has changed to {plat.text}.</strong> This differs from the timetabled platform. Make sure you're heading to the right one.
-              </span>
+            <div className="tip-card tip-platform-changed">
+              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Platform changed to {plat.text}</span>
+                <span className="tip-desc">Different from the timetable — we've confirmed the new platform via live data. Head to platform {plat.text}.</span>
+              </div>
             </div>
           )}
 
-          {/* Coach guidance */}
           {guidance && status.key !== "cancelled" && (
-            <div className="coach-tip">
-              <span className="coach-icon">{"\uD83D\uDCBA"}</span>
-              <div className="coach-content">
-                <span className="coach-title">Unreserved: Coach{guidance.coaches.includes("&") ? "es" : ""} {guidance.coaches}</span>
-                <span className="coach-desc">{guidance.tip}</span>
+            <div className="tip-card tip-coach">
+              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Unreserved: Coach{guidance.coaches.includes("&") ? "es" : ""} {guidance.coaches}</span>
+                <span className="tip-desc">{guidance.tip}</span>
               </div>
             </div>
           )}
@@ -384,43 +402,21 @@ function DepartureCard({ svc }) {
   );
 }
 
-function PlatformLegend() {
-  const [open, setOpen] = useState(false);
+function CompactLegend() {
   return (
-    <>
-      <div className="legend-toggle" onClick={() => setOpen(o => !o)}>
-        <InfoIcon/> {open ? "Hide guide" : "What do the platform badges mean?"} {open ? "\u25B4" : "\u25BE"}
-      </div>
-      {open && (
-        <div className="legend">
-          <div className="legend-title">Platform Confidence</div>
-          <div className="legend-row">
-            <div className="legend-badge plat-confirmed" style={{fontSize:13}}>4</div>
-            <div className="legend-desc"><strong>Confirmed</strong> \u2014 Live signalling data. Go to this platform.</div>
-          </div>
-          <div className="legend-row">
-            <div className="legend-badge plat-changed" style={{fontSize:13,color:"#fff"}}>7</div>
-            <div className="legend-desc"><strong>Changed</strong> \u2014 Different from timetable. Double-check boards.</div>
-          </div>
-          <div className="legend-row">
-            <div className="legend-badge plat-expected" style={{fontSize:12}}>4</div>
-            <div className="legend-desc"><strong>Expected</strong> \u2014 Based on timetable. Not yet announced at station.</div>
-          </div>
-          <div className="legend-row">
-            <div className="legend-badge plat-unknown" style={{fontSize:12}}>{"\u2014"}</div>
-            <div className="legend-desc"><strong>Unknown</strong> \u2014 No platform information available yet.</div>
-          </div>
-        </div>
-      )}
-    </>
+    <div className="legend-bar" role="legend" aria-label="Platform badge legend">
+      <div className="legend-item"><div className="legend-dot legend-dot-confirmed"/> Confirmed</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-changed"/> Changed</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-expected"/> Expected</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-unknown"/> Unknown</div>
+    </div>
   );
 }
 
 // ── App ──
 export default function App() {
   const [dark, setDark] = useState(() => {
-    try { return window.matchMedia("(prefers-color-scheme: dark)").matches; }
-    catch { return true; }
+    try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
   });
   const [screen, setScreen] = useState("search");
   const [stations, setStations] = useState([]);
@@ -431,91 +427,144 @@ export default function App() {
   const [deps, setDeps] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUp, setLastUp] = useState(null);
+  const [lastUpDate, setLastUpDate] = useState(null);
+  const [lastUpText, setLastUpText] = useState("");
   const [clock, setClock] = useState(nowHHMM());
   const [refreshPct, setRefreshPct] = useState(0);
+  const [toasts, setToasts] = useState([]);
+  const [recent, setRecent] = useState(getRecent);
+  const prevDepsRef = useRef(null);
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const pctRef = useRef(null);
   const inputRef = useRef(null);
 
-  useEffect(() => {
-    fetchStations().then(setStations).catch(err => console.error("Stations:", err));
-  }, []);
+  useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); }, []);
 
+  // Clock + relative update time
   useEffect(() => {
-    clockRef.current = setInterval(() => setClock(nowHHMM()), 1000);
+    clockRef.current = setInterval(() => {
+      setClock(nowHHMM());
+      if (lastUpDate) setLastUpText(relativeTime(lastUpDate));
+    }, 1000);
     return () => clearInterval(clockRef.current);
-  }, []);
+  }, [lastUpDate]);
 
   useEffect(() => {
     if (!query.trim()) { setFiltered([]); setShowDrop(false); return; }
     const q = query.toLowerCase();
-    const m = stations.filter(s =>
-      s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)
-    ).slice(0, 8);
-    setFiltered(m);
-    setShowDrop(m.length > 0);
+    setFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 8));
+    setShowDrop(true);
   }, [query, stations]);
+
+  // Platform change detection
+  const detectChanges = useCallback((newServices) => {
+    if (!prevDepsRef.current) { prevDepsRef.current = newServices; return; }
+    const oldMap = {};
+    prevDepsRef.current.forEach(s => { oldMap[svcKey(s)] = getPlatform(s); });
+    const newToasts = [];
+    newServices.forEach(s => {
+      const key = svcKey(s);
+      const oldP = oldMap[key];
+      const newP = getPlatform(s);
+      if (oldP && newP.text !== oldP.text && newP.tier !== "unknown" && newP.tier !== "cancelled") {
+        newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: newP.tier });
+        try { navigator.vibrate?.(200); } catch {}
+      }
+      // Also alert when expected → confirmed
+      if (oldP && oldP.tier === "expected" && newP.tier === "confirmed" && oldP.text === newP.text) {
+        newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: "now-confirmed" });
+        try { navigator.vibrate?.(100); } catch {}
+      }
+    });
+    if (newToasts.length) setToasts(t => [...t, ...newToasts]);
+    prevDepsRef.current = newServices;
+  }, []);
 
   const loadDepartures = useCallback(async (code) => {
     setLoading(true); setError(null);
     try {
       const data = await fetchDepartures(code);
-      setDeps(data.services || []);
-      setLastUp(nowHHMM());
+      const svcs = data.services || [];
+      detectChanges(svcs);
+      setDeps(svcs);
+      const now = new Date();
+      setLastUpDate(now);
+      setLastUpText(relativeTime(now));
       setRefreshPct(0);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, []);
+  }, [detectChanges]);
 
   const selectStation = useCallback((s) => {
     setStation(s); setQuery(""); setShowDrop(false);
+    saveRecent(s); setRecent(getRecent());
+    prevDepsRef.current = null;
     setScreen("board"); loadDepartures(s.code);
   }, [loadDepartures]);
 
   useEffect(() => {
     if (screen !== "board" || !station) return;
     let elapsed = 0;
-    pctRef.current = setInterval(() => {
-      elapsed += 1000;
-      setRefreshPct(Math.min((elapsed / REFRESH_INTERVAL) * 100, 100));
-    }, 1000);
-    timerRef.current = setInterval(() => {
-      elapsed = 0; setRefreshPct(0);
-      loadDepartures(station.code);
-    }, REFRESH_INTERVAL);
+    pctRef.current = setInterval(() => { elapsed += 1000; setRefreshPct(Math.min((elapsed / REFRESH_INTERVAL) * 100, 100)); }, 1000);
+    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(station.code); }, REFRESH_INTERVAL);
     return () => { clearInterval(timerRef.current); clearInterval(pctRef.current); };
   }, [screen, station, loadDepartures]);
 
   const goBack = () => {
-    setScreen("search"); setDeps(null); setError(null);
+    setScreen("search"); setDeps(null); setError(null); setToasts([]);
     clearInterval(timerRef.current); clearInterval(pctRef.current);
+    prevDepsRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 100);
   };
+
+  const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
+
+  // Auto-dismiss toasts
+  useEffect(() => {
+    if (!toasts.length) return;
+    const timer = setTimeout(() => setToasts(t => t.slice(1)), 8000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
 
   return (
     <>
       <style>{getCSS(dark)}</style>
       <div className="app">
+        {/* ── Toasts ── */}
+        {toasts.length > 0 && (
+          <div className="toast-wrap" role="alert" aria-live="assertive">
+            {toasts.map(t => (
+              <div className="toast" key={t.id}>
+                <span className="toast-icon">{t.tier === "now-confirmed" ? "\u2705" : "\u26A0\uFE0F"}</span>
+                {t.tier === "now-confirmed"
+                  ? <span>Platform {t.plat} now <strong>confirmed</strong> for {t.dest}</span>
+                  : <span>Platform changed to <strong>{t.plat}</strong> for {t.dest}</span>
+                }
+                <button className="toast-close" onClick={() => dismissToast(t.id)}>{"\u2715"}</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {screen === "search" && (
           <div className="search-screen">
-            <button className="theme-toggle" onClick={() => setDark(d => !d)}>
+            <button className="theme-toggle" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
               {dark ? <SunIcon/> : <MoonIcon/>}
             </button>
             <div className="logo">Platform</div>
-            <div className="tagline">Know your platform before it's announced</div>
-            <div className="search-wrap">
+            <div className="tagline">Live platforms and seat guidance</div>
+            <div className="search-wrap" role="combobox" aria-expanded={showDrop} aria-haspopup="listbox">
               <div className="search-icon"><SearchIcon/></div>
               <input ref={inputRef} className="search-input" placeholder="Where are you departing from?"
                 value={query} onChange={e => setQuery(e.target.value)}
                 onFocus={() => { if (filtered.length) setShowDrop(true); }}
                 onBlur={() => setTimeout(() => setShowDrop(false), 200)}
-                autoComplete="off"/>
-              {showDrop && (
-                <div className="dropdown">
+                autoComplete="off" aria-label="Search stations" role="searchbox"/>
+              {showDrop && filtered.length > 0 && (
+                <div className="dropdown" role="listbox">
                   {filtered.map(s => (
-                    <div key={s.code} className="dropdown-item" onMouseDown={() => selectStation(s)}>
+                    <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectStation(s)}>
                       <span className="dropdown-name">{s.name}</span>
                       <span className="dropdown-code">{s.code}</span>
                     </div>
@@ -523,7 +572,26 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="search-hint">Search by station name or code</div>
+
+            {recent.length > 0 && !query && (
+              <div className="recent-section">
+                <div className="recent-label">Recent stations</div>
+                <div className="recent-list">
+                  {recent.map(s => (
+                    <div key={s.code} className="recent-btn" role="button" tabIndex={0}
+                      onClick={() => selectStation(s)} onKeyDown={e => e.key === "Enter" && selectStation(s)}>
+                      <span className="recent-name">{s.name}</span>
+                      <span className="recent-code">{s.code}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="donate-section" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK","_blank")} role="button" tabIndex={0}>
+              <span>{"\u2764\uFE0F"}</span>
+              <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
+            </div>
           </div>
         )}
 
@@ -531,17 +599,17 @@ export default function App() {
           <div className="board-screen">
             <div className="board-header">
               <div className="header-row1">
-                <button className="back-btn" onClick={goBack}><BackIcon/></button>
+                <button className="back-btn" onClick={goBack} aria-label="Back to search"><BackIcon/></button>
                 <span className="station-name">{station?.name}</span>
                 <span className="header-clock">{clock}</span>
               </div>
               <div className="header-row2">
-                <span className="header-sub">{lastUp ? `Updated ${lastUp}` : "Loading\u2026"}</span>
+                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
                 <div className="header-actions">
-                  <button className="live-pill" onClick={() => station && loadDepartures(station.code)}>
+                  <button className="live-pill" onClick={() => station && loadDepartures(station.code)} aria-label="Refresh departures">
                     <span className="live-dot"/>LIVE
                   </button>
-                  <button className="theme-btn-sm" onClick={() => setDark(d => !d)}>
+                  <button className="theme-btn-sm" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
                     {dark ? <SunIcon/> : <MoonIcon/>}
                   </button>
                 </div>
@@ -556,23 +624,18 @@ export default function App() {
               <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => station && loadDepartures(station.code)}>Retry</button></div>
             )}
             {!loading && !error && deps && deps.length === 0 && (
-              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">No departures found</div></div>
+              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">No departures in the next hour</div></div>
             )}
             {deps && deps.length > 0 && (
               <>
-                <PlatformLegend/>
-                <div className="card-list">
+                <CompactLegend/>
+                <div className="card-list" role="list" aria-label="Departures">
                   {deps.map((svc, i) => <DepartureCard key={i} svc={svc}/>)}
                 </div>
               </>
             )}
           </div>
         )}
-
-        <div className="donate-float" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK", "_blank")}>
-          <span className="donate-heart">{"\u2764\uFE0F"}</span>
-          <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
-        </div>
       </div>
     </>
   );
