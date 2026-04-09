@@ -241,9 +241,9 @@ function getCSS(dark) {
   .status-delayed{background:rgba(245,158,11,.1);color:var(--amber)}
   .status-cancelled{background:rgba(239,68,68,.1);color:var(--red)}
   .coach-pill{font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-dim);padding:2px 7px;border-radius:5px}
-  .coach-pill-hint{color:var(--text-muted);background:transparent;border:1.5px dashed var(--border-light);font-style:italic;padding:1px 6px}
+  .coach-pill-hint{color:var(--text-muted);background:transparent;border:1.5px dashed var(--border-light);padding:1px 6px}
   .coach-pill-free{color:var(--green);background:rgba(16,185,129,.1)}
-  .coach-pill-none{color:var(--text-dim);background:transparent;border:1px solid var(--border);font-style:italic;padding:1px 6px}
+  .coach-pill-none{color:var(--text-dim);background:transparent;border:1px solid var(--border);padding:1px 6px}
   .operator-name{font-size:11px;color:var(--text-dim)}
 
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
@@ -275,7 +275,7 @@ function getCSS(dark) {
   .tip-title{font-size:12px;font-weight:700;color:var(--text)}
   .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
   .tip-hint .tip-title{color:var(--text-muted)}
-  .tip-hint .tip-desc{font-style:italic}
+  .tip-hint .tip-desc{color:var(--text-dim)}
   .tip-meta{display:flex;align-items:center;gap:10px;margin-top:4px}
   .tip-verified{font-size:11px;color:var(--text-dim)}
   .tip-report{font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline;background:none;border:none;font-family:inherit;padding:0}
@@ -391,8 +391,16 @@ function DepartureCard({ svc }) {
             <div className="tip-card tip-platform">
               <span className="tip-icon">{"\u2705"}</span>
               <div className="tip-content">
-                <span className="tip-title">Platform {plat.text} is confirmed</span>
-                <span className="tip-desc">Live signalling data — head there now.</span>
+                <span className="tip-title">
+                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
+                    ? `Your train is at Platform ${plat.text}`
+                    : `Platform ${plat.text} confirmed — head there now`}
+                </span>
+                <span className="tip-desc">
+                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
+                    ? "This is your train — board now."
+                    : "Your train hasn't arrived yet. If there's already a train at this platform, don't board it — check the destination shown on the front of the train and wait for yours."}
+                </span>
               </div>
             </div>
           )}
@@ -400,29 +408,39 @@ function DepartureCard({ svc }) {
             <div className="tip-card tip-platform-changed">
               <span className="tip-icon">{"\u26A0\uFE0F"}</span>
               <div className="tip-content">
-                <span className="tip-title">Platform changed to {plat.text}</span>
-                <span className="tip-desc">Different from the timetable — we've confirmed the new platform via live data. Head to platform {plat.text}.</span>
+                <span className="tip-title">
+                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
+                    ? `Platform changed — your train is at Platform ${plat.text}`
+                    : `Platform changed to ${plat.text} — head there now`}
+                </span>
+                <span className="tip-desc">
+                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
+                    ? "Different from the timetable, but confirmed via live data. This is your train — board now."
+                    : "Different from the timetable — confirmed via live data. If there's already a train at this platform, don't board it — check the destination on the front and wait for yours."}
+                </span>
               </div>
             </div>
           )}
 
           {/* Seating guidance */}
-          {status.key !== "cancelled" && guidance && (
-            <div className={`tip-card ${guidance.confidence === "high" ? "tip-coach" : "tip-hint"}`}>
-              <span className="tip-icon">{guidance.confidence === "high" ? "\uD83D\uDCBA" : "\uD83D\uDCA1"}</span>
+          {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
+            <div className="tip-card tip-coach">
+              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
-                <span className="tip-desc">{guidance.detail}</span>
-                {guidance.confidence === "hint" && (
-                  <>
-                    <span className="tip-desc">{FALLBACK_ADVICE}</span>
-                    {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly. Arrive early on the platform.</span>}
-                    <div className="tip-meta">
-                      {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
-                      <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks for the feedback! We'll review this."); }}>Report incorrect</button>
-                    </div>
-                  </>
-                )}
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && guidance && guidance.confidence === "hint" && (
+            <div className="tip-card tip-hint">
+              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
+              <div className="tip-content">
+                <span className="tip-title">{guidance.short}</span>
+                {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly.</span>}
+                <div className="tip-meta">
+                  {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
+                  <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks! We'll review this."); }}>Report incorrect</button>
+                </div>
               </div>
             </div>
           )}
@@ -430,8 +448,7 @@ function DepartureCard({ svc }) {
             <div className="tip-card tip-free">
               <span className="tip-icon">{"\u2705"}</span>
               <div className="tip-content">
-                <span className="tip-title">No reservations on {operator}</span>
-                <span className="tip-desc">This operator doesn't use seat reservations — every seat is first come, first served.</span>
+                <span className="tip-title">No reservations — every seat is first come, first served.</span>
               </div>
             </div>
           )}
@@ -439,8 +456,7 @@ function DepartureCard({ svc }) {
             <div className="tip-card tip-hint">
               <span className="tip-icon">{"\u26A0\uFE0F"}</span>
               <div className="tip-content">
-                <span className="tip-title">Reservation required</span>
-                <span className="tip-desc">This operator requires a reservation for all seats. Check your booking for your coach and seat number.</span>
+                <span className="tip-title">Reservation required — check your booking for coach and seat.</span>
               </div>
             </div>
           )}
@@ -448,8 +464,7 @@ function DepartureCard({ svc }) {
             <div className="tip-card tip-hint">
               <span className="tip-icon">{"\u2139\uFE0F"}</span>
               <div className="tip-content">
-                <span className="tip-title">No seating guidance available</span>
-                <span className="tip-desc">{FALLBACK_ADVICE}</span>
+                <span className="tip-title">No seating info — look for unreserved seats when you get on the train.</span>
               </div>
             </div>
           )}
