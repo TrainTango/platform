@@ -4,18 +4,26 @@ const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
 // ── Seating Guidance (tiered by confidence) ──
-const HINT_SUFFIX = " Once on board, look for seats without a reserved ticket in the headrest — or ask a member of train staff who can point you to unreserved seats.";
+// ── Seating Guidance ──
+const FALLBACK_ADVICE = "Unreserved seats have no display lit above them and no card in the headrest. If a seat shows a reservation on a screen or paper slip, it's taken.";
 
 const COACH_GUIDANCE = {
-  "LNER": { confidence: "high", coaches: "C", tip: "Coach C is always the unreserved coach on LNER. It's towards the north end on 9/10-car Azumas, or mid-train on 5-car services.", cardLabel: "Unreserved: C" },
-  "Avanti West Coast": { confidence: "hint", coaches: "C", tip: "Coach C is often unreserved. On 11-car Pendolinos, Coach U may also be unreserved. Coach G on refurbished trains is also unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: C" },
-  "CrossCountry": { confidence: "hint", coaches: "B or D", tip: "On 5 or 9-coach trains, Coach B is usually unreserved. On 4 or 8-coach trains, some seats in Coach D are unreserved. This changed in June 2024." + HINT_SUFFIX, cardLabel: "Often unreserved: B" },
-  "Great Western Railway": { confidence: "hint", coaches: "G", tip: "Coach G is usually unreserved on London services. Non-London services are fully unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: G" },
-  "East Midlands Railway": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on London services. Non-London services and Corby 'Connect' services are fully unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: D" },
-  "Hull Trains": { confidence: "high", coaches: "A", tip: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "Unreserved: A" },
-  "TransPennine Express": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on Nova trains. On Class 185 trains, some seats in Coaches A and B are unreserved." + HINT_SUFFIX, cardLabel: "Often unreserved: D" },
-  "Grand Central": { confidence: "hint", coaches: "B", tip: "Part of Coach B is usually unreserved on Sunderland services. On Bradford services, unreserved seats are spread throughout." + HINT_SUFFIX, cardLabel: "Partially unreserved: B" },
+  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", detail: "Coach C is always unreserved on LNER \u2014 north end on 9/10-car Azumas, mid-train on 5-car.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
+  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", detail: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "\uD83D\uDCBA Unreserved: A" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", detail: "Coach C is often unreserved. On 11-car Pendolinos, Coach U and refurbished Coach G may also be free.", cardLabel: "\uD83D\uDCA1 Coach C may be free", verified: "Mar 2026" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", detail: "Non-London services are fully unreserved. On London services, Coach G is usually the unreserved coach.", cardLabel: "\uD83D\uDCA1 Coach G may be free", verified: "Mar 2026" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", detail: "Non-London and Corby 'Connect' services are fully unreserved. On London services, Coach D is usually unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", detail: "On Class 185 trains, some seats in Coaches A and B are unreserved instead.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
+  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", detail: "On Sunderland services, part of Coach B is usually unreserved. On Bradford services, unreserved seats are spread throughout.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Mar 2026" },
+  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats \u2014 look for green lights above seats.", detail: "Lumo has no dedicated unreserved coach. The few unreserved seats are marked with a green light.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
 };
+
+// CrossCountry uses formation-dependent logic
+function getCrossCountryGuidance(numVehicles) {
+  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", detail: "On 9/10-coach trains, Coaches B, H and L are unreserved.", cardLabel: "\uD83D\uDCA1 Coaches B, H, L may be free", verified: "Apr 2026" };
+  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", detail: "On 5-coach Voyagers, Coach B is usually unreserved. Some seats in Coach D may also be free.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Apr 2026" };
+  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", detail: "On 4-coach trains there is no dedicated unreserved coach. A small number of seats in Coach D are usually unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Apr 2026" };
+}
 
 const NO_RESERVATION_OPERATORS = new Set([
   "c2c", "Chiltern Railways", "Elizabeth line", "Gatwick Express",
@@ -28,7 +36,16 @@ const NO_RESERVATION_OPERATORS = new Set([
 
 const COMPULSORY_RESERVATION = new Set(["Caledonian Sleeper"]);
 
-const LUMO_GUIDANCE = { confidence: "hint", tip: "Lumo has very limited unreserved seats, marked with a green light above them. There is no dedicated unreserved coach. Ask a member of staff on board if you need help finding one.", cardLabel: "Limited unreserved" };
+function isPeakHour() {
+  const h = new Date().getHours(), m = new Date().getMinutes();
+  const t = h * 60 + m;
+  return (t >= 420 && t <= 570) || (t >= 990 && t <= 1140); // 07:00-09:30 or 16:30-19:00
+}
+
+function getGuidance(operator, numVehicles) {
+  if (operator === "CrossCountry") return getCrossCountryGuidance(numVehicles);
+  return COACH_GUIDANCE[operator] || null;
+}
 
 // ── Recent Stations ──
 function getRecent() {
@@ -224,8 +241,9 @@ function getCSS(dark) {
   .status-delayed{background:rgba(245,158,11,.1);color:var(--amber)}
   .status-cancelled{background:rgba(239,68,68,.1);color:var(--red)}
   .coach-pill{font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-dim);padding:2px 7px;border-radius:5px}
-  .coach-pill-hint{color:var(--text-muted);background:var(--bg-input);font-style:italic}
+  .coach-pill-hint{color:var(--text-muted);background:transparent;border:1.5px dashed var(--border-light);font-style:italic;padding:1px 6px}
   .coach-pill-free{color:var(--green);background:rgba(16,185,129,.1)}
+  .coach-pill-none{color:var(--text-dim);background:transparent;border:1px solid var(--border);font-style:italic;padding:1px 6px}
   .operator-name{font-size:11px;color:var(--text-dim)}
 
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
@@ -258,6 +276,11 @@ function getCSS(dark) {
   .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
   .tip-hint .tip-title{color:var(--text-muted)}
   .tip-hint .tip-desc{font-style:italic}
+  .tip-meta{display:flex;align-items:center;gap:10px;margin-top:4px}
+  .tip-verified{font-size:11px;color:var(--text-dim)}
+  .tip-report{font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline;background:none;border:none;font-family:inherit;padding:0}
+  .tip-report:hover{opacity:.7}
+  .tip-peak{font-size:11px;color:var(--amber);font-weight:600;margin-top:2px}
 
   .detail-row{display:flex;gap:16px;flex-wrap:wrap}
   .detail-item{display:flex;flex-direction:column;gap:1px}
@@ -305,10 +328,10 @@ function DepartureCard({ svc }) {
   const mins = minsUntil(effective);
   const isDelayed = status.key === "delayed";
   const vehicles = svc.locationMetadata?.numberOfVehicles;
-  const guidance = COACH_GUIDANCE[operator];
+  const guidance = getGuidance(operator, vehicles);
   const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
   const isCompulsory = COMPULSORY_RESERVATION.has(operator);
-  const isLumo = operator === "Lumo";
+  const hasAnyGuidance = guidance || isNoReservation || isCompulsory;
   const reasons = svc.reasons;
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
 
@@ -331,13 +354,13 @@ function DepartureCard({ svc }) {
         <div className="meta-row">
           <span className={`status-badge status-${status.key}`}>{status.label}</span>
           {status.key !== "cancelled" && guidance && (
-            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{"\uD83D\uDCBA"} {guidance.cardLabel}</span>
+            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{guidance.cardLabel}</span>
           )}
           {status.key !== "cancelled" && isNoReservation && (
-            <span className="coach-pill coach-pill-free">{"\u2705"} Sit anywhere</span>
+            <span className="coach-pill coach-pill-free">{"\u2705"} No reservations</span>
           )}
-          {status.key !== "cancelled" && isLumo && (
-            <span className="coach-pill coach-pill-hint">{"\uD83D\uDCBA"} {LUMO_GUIDANCE.cardLabel}</span>
+          {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
+            <span className="coach-pill coach-pill-none">{"\u2139\uFE0F"} No seating info</span>
           )}
           <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
         </div>
@@ -383,12 +406,23 @@ function DepartureCard({ svc }) {
             </div>
           )}
 
+          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && (
             <div className={`tip-card ${guidance.confidence === "high" ? "tip-coach" : "tip-hint"}`}>
               <span className="tip-icon">{guidance.confidence === "high" ? "\uD83D\uDCBA" : "\uD83D\uDCA1"}</span>
               <div className="tip-content">
-                <span className="tip-title">{guidance.confidence === "high" ? `Unreserved: Coach ${guidance.coaches}` : `Seating hint: Coach ${guidance.coaches}`}</span>
-                <span className="tip-desc">{guidance.tip}</span>
+                <span className="tip-title">{guidance.short}</span>
+                <span className="tip-desc">{guidance.detail}</span>
+                {guidance.confidence === "hint" && (
+                  <>
+                    <span className="tip-desc">{FALLBACK_ADVICE}</span>
+                    {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly. Arrive early on the platform.</span>}
+                    <div className="tip-meta">
+                      {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
+                      <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks for the feedback! We'll review this."); }}>Report incorrect</button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -397,16 +431,7 @@ function DepartureCard({ svc }) {
               <span className="tip-icon">{"\u2705"}</span>
               <div className="tip-content">
                 <span className="tip-title">No reservations on {operator}</span>
-                <span className="tip-desc">This operator doesn't use seat reservations. Every seat is unreserved — just board and sit anywhere.</span>
-              </div>
-            </div>
-          )}
-          {status.key !== "cancelled" && isLumo && (
-            <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
-              <div className="tip-content">
-                <span className="tip-title">Limited unreserved seats</span>
-                <span className="tip-desc">{LUMO_GUIDANCE.tip}</span>
+                <span className="tip-desc">This operator doesn't use seat reservations — every seat is first come, first served.</span>
               </div>
             </div>
           )}
@@ -415,7 +440,16 @@ function DepartureCard({ svc }) {
               <span className="tip-icon">{"\u26A0\uFE0F"}</span>
               <div className="tip-content">
                 <span className="tip-title">Reservation required</span>
-                <span className="tip-desc">This operator requires a reservation for all seats. Check your booking confirmation for your coach and seat number.</span>
+                <span className="tip-desc">This operator requires a reservation for all seats. Check your booking for your coach and seat number.</span>
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
+            <div className="tip-card tip-hint">
+              <span className="tip-icon">{"\u2139\uFE0F"}</span>
+              <div className="tip-content">
+                <span className="tip-title">No seating guidance available</span>
+                <span className="tip-desc">{FALLBACK_ADVICE}</span>
               </div>
             </div>
           )}
