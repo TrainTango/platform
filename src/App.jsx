@@ -71,10 +71,10 @@ function checkPlatformOccupancy(userService, allServices) {
 /**
  * getPlatformMessage(userService, allServices)
  *
+ * Simplified to one core question: can we confirm the train at this platform
+ * is the user's train? If yes → board. If no → check the destination display.
+ *
  * Returns: { title, description, icon, cardLabel, tier, tipClass }
- *   tier:     "board" | "ready" | "go" | "go-caution" | "departed" |
- *             "expected" | "unknown" | "cancelled"
- *   tipClass: CSS class for the tip card background
  */
 function getPlatformMessage(userService, allServices) {
   const platNum = getPlatNum(userService);
@@ -82,60 +82,55 @@ function getPlatformMessage(userService, allServices) {
   const trainStatus = getTrainStatus(userService);
   const isCancelled = userService.temporalData?.departure?.isCancelled;
   const hasActualDep = !!userService.temporalData?.departure?.realtimeActual;
+  const isChanged = platTier === "changed";
 
-  // ── Cancelled ──
   if (isCancelled) {
     return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "🚫", cardLabel: null, tier: "cancelled", tipClass: "tip-cancelled" };
   }
 
-  // ── Platform unknown ──
   if (platTier === "unknown" || !platNum) {
     return { title: "Platform not yet assigned", description: "We'll show it here as soon as it's available.", icon: "⏳", cardLabel: null, tier: "unknown", tipClass: "tip-hint" };
   }
 
-  // ── Platform expected (no actual) ──
   if (platTier === "expected") {
-    return { title: `Platform ${platNum} expected`, description: "Based on timetable data. We'll confirm once live signalling comes through.", icon: "🟡", cardLabel: null, tier: "expected", tipClass: "tip-platform" };
+    return { title: `Platform ${platNum} expected`, description: "We'll confirm when live signalling data comes through.", icon: "🟡", cardLabel: null, tier: "expected", tipClass: "tip-platform" };
   }
 
-  // ── From here: platform is confirmed or changed ──
-  const { occupied } = checkPlatformOccupancy(userService, allServices);
-  const isChanged = platTier === "changed";
-  const changedPrefix = isChanged ? `Platform changed to ${platNum}. ` : "";
-  const changedIcon = isChanged ? "⚠️" : undefined;
-  const baseTipClass = isChanged ? "tip-platform-changed" : "tip-platform";
+  // ── Platform is confirmed or changed ──
 
-  // ── Departed ──
   if (trainStatus === "DEPARTING" || hasActualDep) {
     return { title: "This train has departed", description: "Check the next service to your destination.", icon: "🚆", cardLabel: null, tier: "departed", tipClass: "tip-hint" };
   }
 
-  // ── Preparing / ready to depart ──
-  if (trainStatus === "DEPART_PREPARING" || trainStatus === "DEPART_READY") {
-    return { title: `${changedPrefix}Your train is ready at Platform ${platNum}`, description: "Doors may close soon — board immediately.", icon: changedIcon || "🟢", cardLabel: "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-board" };
+  // Can we confirm the train at this platform is theirs?
+  // Yes: their service shows AT_PLATFORM, DEPART_PREPARING, or DEPART_READY
+  const confirmed = trainStatus === "AT_PLATFORM" || trainStatus === "DEPART_PREPARING" || trainStatus === "DEPART_READY";
+
+  // Is departure imminent with no status? Train is almost certainly there.
+  const depTime = userService.temporalData?.departure?.realtimeForecast
+    || userService.temporalData?.departure?.scheduleAdvertised;
+  const minsOut = depTime ? Math.round((new Date(depTime) - new Date()) / 60000) : null;
+  const likelyHere = minsOut !== null && minsOut <= 5;
+
+  if (confirmed) {
+    const title = isChanged
+      ? `Platform changed to ${platNum} — board now`
+      : `Platform ${platNum} — board now`;
+    return { title, description: "Your train is here.", icon: isChanged ? "⚠️" : "✅", cardLabel: "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-board" };
   }
 
-  // ── At the platform ──
-  if (trainStatus === "AT_PLATFORM") {
-    if (occupied) {
-      return { title: `${changedPrefix}Your train is at Platform ${platNum}`, description: "Another service is also showing here. Check the destination on the train before boarding.", icon: changedIcon || "✅", cardLabel: "Check & board", tier: "board", tipClass: baseTipClass };
-    }
-    return { title: `${changedPrefix}Your train is at Platform ${platNum} — board now`, description: "This is your train. Get on and find a seat.", icon: changedIcon || "✅", cardLabel: "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-board" };
+  if (likelyHere) {
+    const title = isChanged
+      ? `Platform changed to ${platNum}`
+      : `Head to Platform ${platNum}`;
+    return { title, description: "Check the destination on the train before boarding.", icon: isChanged ? "⚠️" : "✅", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
   }
 
-  // ── Approaching / arriving ──
-  if (trainStatus === "ARRIVING" || trainStatus === "APPROACHING") {
-    if (occupied) {
-      return { title: `${changedPrefix}Head to Platform ${platNum} — your train is approaching`, description: "Another train is still here. Don't board it — wait for yours.", icon: changedIcon || "🟢", cardLabel: "Approaching", tier: "go-caution", tipClass: baseTipClass };
-    }
-    return { title: `${changedPrefix}Head to Platform ${platNum} — your train is approaching`, description: "Platform confirmed. Your train will arrive shortly.", icon: changedIcon || "🟢", cardLabel: "Approaching", tier: "go", tipClass: baseTipClass };
-  }
-
-  // ── No train status yet — platform confirmed ──
-  if (occupied) {
-    return { title: `${changedPrefix}Platform ${platNum} confirmed — head there now`, description: "There's another train here. Don't board it — check the destination and wait for yours.", icon: changedIcon || "✅", cardLabel: "Go — check train", tier: "go-caution", tipClass: baseTipClass };
-  }
-  return { title: `${changedPrefix}Platform ${platNum} confirmed — head there now`, description: "Your train hasn't arrived yet. You'll be first on the platform.", icon: changedIcon || "✅", cardLabel: null, tier: "go", tipClass: baseTipClass };
+  // Train isn't here yet — no need to check anything, just go
+  const title = isChanged
+    ? `Platform changed to ${platNum} — head there now`
+    : `Head to Platform ${platNum}`;
+  return { title, description: "Get there early and be first to board.", icon: isChanged ? "⚠️" : "✅", cardLabel: null, tier: "go", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
