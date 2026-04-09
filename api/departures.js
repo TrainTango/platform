@@ -26,9 +26,14 @@ export default async function handler(req, res) {
   const code = (req.query.code || '').toUpperCase().trim();
   if (!code) return res.status(400).json({ error: 'Missing station code' });
 
+  const to = (req.query.to || '').toUpperCase().trim();
+
   try {
     const token = await getAccessToken();
-    const response = await fetch(`${RTT_BASE}/gb-nr/location?code=${code}`, {
+    let url = `${RTT_BASE}/gb-nr/location?code=${code}`;
+    if (to) url += `&filterTo=${to}`;
+
+    const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status === 204) return res.status(200).json({ services: [] });
