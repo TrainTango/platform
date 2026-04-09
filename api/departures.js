@@ -21,37 +21,22 @@ async function getAccessToken() {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 's-maxage=15');
 
   const code = (req.query.code || '').toUpperCase().trim();
+  if (!code) return res.status(400).json({ error: 'Missing station code' });
 
   try {
     const token = await getAccessToken();
-
-    // Test three different URL formats
-    const urls = [
-      `${RTT_BASE}/gb-nr/location?code=${code}`,
-      `${RTT_BASE}/gb-nr/location?code=WATRLMN`,
-      `${RTT_BASE}/rtt/location?code=gb-nr:${code}`,
-    ];
-
-    const results = [];
-    for (const url of urls) {
-      const r = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const text = await r.text();
-      let body;
-      try { body = JSON.parse(text); } catch { body = text; }
-      results.push({
-        url: url.replace(RTT_BASE, ''),
-        status: r.status,
-        hasServices: body?.services?.length || 0,
-        sample: typeof body === 'object' ? body : text.slice(0, 200),
-      });
-    }
-
-    return res.status(200).json({ results });
+    const response = await fetch(`${RTT_BASE}/gb-nr/location?code=${code}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 204) return res.status(200).json({ services: [] });
+    if (!response.ok) throw new Error(`RTT returned ${response.status}`);
+    const data = await response.json();
+    return res.status(200).json(data);
   } catch (err) {
+    console.error('Departures error:', err.message);
     return res.status(502).json({ error: err.message });
   }
 }
