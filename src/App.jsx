@@ -45,10 +45,7 @@ async function fetchDepartures(code) {
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
   if (data.services) {
-    data.services = data.services.filter(svc => {
-      const dep = svc.temporalData?.departure;
-      return dep && dep.scheduleAdvertised;
-    });
+    data.services = data.services.filter(svc => svc.temporalData?.departure);
   }
   return data;
 }
