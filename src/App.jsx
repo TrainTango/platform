@@ -659,6 +659,9 @@ function DonationWidget({ dark }) {
                 </label>
 
                 {error && <div className="donate-error">{error}</div>}
+                {finalAmount > 0 && finalAmount < 1 && (
+                  <div className="donate-error">Pop in at least £1 to continue</div>
+                )}
 
                 <button className="donate-submit-btn" disabled={loading || !finalAmount || finalAmount < 1} onClick={handleContinue}>
                   {loading ? "Loading…" : "Support"}
