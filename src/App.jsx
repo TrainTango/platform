@@ -3,26 +3,160 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
-// ── Seating Guidance (tiered by confidence) ──
-// ── Seating Guidance ──
-const FALLBACK_ADVICE = "Unreserved seats have no display lit above them and no card in the headrest. If a seat shows a reservation on a screen or paper slip, it's taken.";
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Platform Confirmation Messaging Engine ────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Get the best-known platform number for a service. */
+function getPlatNum(svc) {
+  const p = svc.locationMetadata?.platform;
+  return p?.actual || p?.forecast || p?.planned || null;
+}
+
+/** Get the platform confidence tier. */
+function getPlatTier(svc) {
+  const p = svc.locationMetadata?.platform;
+  if (!p) return "unknown";
+  if (p.actual) {
+    return p.planned && p.actual !== p.planned ? "changed" : "confirmed";
+  }
+  if (p.forecast || p.planned) return "expected";
+  return "unknown";
+}
+
+/** Get the live movement status of a service (checks departure then arrival). */
+function getTrainStatus(svc) {
+  return svc.temporalData?.departure?.status || svc.temporalData?.arrival?.status || null;
+}
+
+/** True if two service objects represent the same service. */
+function isSameService(a, b) {
+  const aUid = a.serviceMetadata?.serviceUid;
+  const bUid = b.serviceMetadata?.serviceUid;
+  if (aUid && bUid) return aUid === bUid;
+  const aDest = a.destination?.[0]?.location?.description;
+  const bDest = b.destination?.[0]?.location?.description;
+  const aTime = a.temporalData?.departure?.scheduleAdvertised;
+  const bTime = b.temporalData?.departure?.scheduleAdvertised;
+  return aDest === bDest && aTime === bTime;
+}
+
+/**
+ * Statuses that mean a train is physically present or imminently
+ * occupying the platform — the platform is NOT clear.
+ */
+const OCCUPYING_STATUSES = new Set([
+  "ARRIVING", "AT_PLATFORM", "DEPART_PREPARING", "DEPART_READY", "DEPARTING",
+]);
+
+/**
+ * Check whether another service is currently occupying the same platform.
+ * Returns { occupied: boolean }
+ */
+function checkPlatformOccupancy(userService, allServices) {
+  const userPlat = getPlatNum(userService);
+  if (!userPlat) return { occupied: false };
+  for (const svc of allServices) {
+    if (isSameService(svc, userService)) continue;
+    const svcPlat = svc.locationMetadata?.platform?.actual
+      || svc.locationMetadata?.platform?.forecast
+      || svc.locationMetadata?.platform?.planned;
+    if (svcPlat !== userPlat) continue;
+    const status = svc.temporalData?.departure?.status || svc.temporalData?.arrival?.status;
+    if (status && OCCUPYING_STATUSES.has(status)) return { occupied: true };
+  }
+  return { occupied: false };
+}
+
+/**
+ * getPlatformMessage(userService, allServices)
+ *
+ * Returns: { title, description, icon, cardLabel, tier, tipClass }
+ *   tier:     "board" | "ready" | "go" | "go-caution" | "departed" |
+ *             "expected" | "unknown" | "cancelled"
+ *   tipClass: CSS class for the tip card background
+ */
+function getPlatformMessage(userService, allServices) {
+  const platNum = getPlatNum(userService);
+  const platTier = getPlatTier(userService);
+  const trainStatus = getTrainStatus(userService);
+  const isCancelled = userService.temporalData?.departure?.isCancelled;
+  const hasActualDep = !!userService.temporalData?.departure?.realtimeActual;
+
+  // ── Cancelled ──
+  if (isCancelled) {
+    return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "🚫", cardLabel: null, tier: "cancelled", tipClass: "tip-cancelled" };
+  }
+
+  // ── Platform unknown ──
+  if (platTier === "unknown" || !platNum) {
+    return { title: "Platform not yet assigned", description: "We'll show it here as soon as it's available.", icon: "⏳", cardLabel: null, tier: "unknown", tipClass: "tip-hint" };
+  }
+
+  // ── Platform expected (no actual) ──
+  if (platTier === "expected") {
+    return { title: `Platform ${platNum} expected`, description: "Based on timetable data. We'll confirm once live signalling comes through.", icon: "🟡", cardLabel: null, tier: "expected", tipClass: "tip-platform" };
+  }
+
+  // ── From here: platform is confirmed or changed ──
+  const { occupied } = checkPlatformOccupancy(userService, allServices);
+  const isChanged = platTier === "changed";
+  const changedPrefix = isChanged ? `Platform changed to ${platNum}. ` : "";
+  const changedIcon = isChanged ? "⚠️" : undefined;
+  const baseTipClass = isChanged ? "tip-platform-changed" : "tip-platform";
+
+  // ── Departed ──
+  if (trainStatus === "DEPARTING" || hasActualDep) {
+    return { title: "This train has departed", description: "Check the next service to your destination.", icon: "🚆", cardLabel: null, tier: "departed", tipClass: "tip-hint" };
+  }
+
+  // ── Preparing / ready to depart ──
+  if (trainStatus === "DEPART_PREPARING" || trainStatus === "DEPART_READY") {
+    return { title: `${changedPrefix}Your train is ready at Platform ${platNum}`, description: "Doors may close soon — board immediately.", icon: changedIcon || "🟢", cardLabel: "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-board" };
+  }
+
+  // ── At the platform ──
+  if (trainStatus === "AT_PLATFORM") {
+    if (occupied) {
+      return { title: `${changedPrefix}Your train is at Platform ${platNum}`, description: "Another service is also showing here. Check the destination on the train before boarding.", icon: changedIcon || "✅", cardLabel: "Check & board", tier: "board", tipClass: baseTipClass };
+    }
+    return { title: `${changedPrefix}Your train is at Platform ${platNum} — board now`, description: "This is your train. Get on and find a seat.", icon: changedIcon || "✅", cardLabel: "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-board" };
+  }
+
+  // ── Approaching / arriving ──
+  if (trainStatus === "ARRIVING" || trainStatus === "APPROACHING") {
+    if (occupied) {
+      return { title: `${changedPrefix}Head to Platform ${platNum} — your train is approaching`, description: "Another train is still here. Don't board it — wait for yours.", icon: changedIcon || "🟢", cardLabel: "Approaching", tier: "go-caution", tipClass: baseTipClass };
+    }
+    return { title: `${changedPrefix}Head to Platform ${platNum} — your train is approaching`, description: "Platform confirmed. Your train will arrive shortly.", icon: changedIcon || "🟢", cardLabel: "Approaching", tier: "go", tipClass: baseTipClass };
+  }
+
+  // ── No train status yet — platform confirmed ──
+  if (occupied) {
+    return { title: `${changedPrefix}Platform ${platNum} confirmed — head there now`, description: "There's another train here. Don't board it — check the destination and wait for yours.", icon: changedIcon || "✅", cardLabel: "Go — check train", tier: "go-caution", tipClass: baseTipClass };
+  }
+  return { title: `${changedPrefix}Platform ${platNum} confirmed — head there now`, description: "Your train hasn't arrived yet. You'll be first on the platform.", icon: changedIcon || "✅", cardLabel: null, tier: "go", tipClass: baseTipClass };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Seating Guidance (tiered by confidence) ──────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 
 const COACH_GUIDANCE = {
-  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", detail: "Coach C is always unreserved on LNER \u2014 north end on 9/10-car Azumas, mid-train on 5-car.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
-  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", detail: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "\uD83D\uDCBA Unreserved: A" },
-  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", detail: "Coach C is often unreserved. On 11-car Pendolinos, Coach U and refurbished Coach G may also be free.", cardLabel: "\uD83D\uDCA1 Coach C may be free", verified: "Mar 2026" },
-  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", detail: "Non-London services are fully unreserved. On London services, Coach G is usually the unreserved coach.", cardLabel: "\uD83D\uDCA1 Coach G may be free", verified: "Mar 2026" },
-  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", detail: "Non-London and Corby 'Connect' services are fully unreserved. On London services, Coach D is usually unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
-  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", detail: "On Class 185 trains, some seats in Coaches A and B are unreserved instead.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
-  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", detail: "On Sunderland services, part of Coach B is usually unreserved. On Bradford services, unreserved seats are spread throughout.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Mar 2026" },
-  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats \u2014 look for green lights above seats.", detail: "Lumo has no dedicated unreserved coach. The few unreserved seats are marked with a green light.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
+  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", detail: "Coach C is always unreserved on LNER — north end on 9/10-car Azumas, mid-train on 5-car.", cardLabel: "💺 Unreserved: C" },
+  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", detail: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "💺 Unreserved: A" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", detail: "Coach C is often unreserved. On 11-car Pendolinos, Coach U and refurbished Coach G may also be free.", cardLabel: "💡 Coach C may be free", verified: "Mar 2026" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", detail: "Non-London services are fully unreserved. On London services, Coach G is usually the unreserved coach.", cardLabel: "💡 Coach G may be free", verified: "Mar 2026" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", detail: "Non-London and Corby 'Connect' services are fully unreserved. On London services, Coach D is usually unreserved.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", detail: "On Class 185 trains, some seats in Coaches A and B are unreserved instead.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
+  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", detail: "On Sunderland services, part of Coach B is usually unreserved. On Bradford services, unreserved seats are spread throughout.", cardLabel: "💡 Coach B may be free", verified: "Mar 2026" },
+  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats — look for green lights above seats.", detail: "Lumo has no dedicated unreserved coach. The few unreserved seats are marked with a green light.", cardLabel: "💡 Limited unreserved", verified: "Mar 2026" },
 };
 
-// CrossCountry uses formation-dependent logic
 function getCrossCountryGuidance(numVehicles) {
-  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", detail: "On 9/10-coach trains, Coaches B, H and L are unreserved.", cardLabel: "\uD83D\uDCA1 Coaches B, H, L may be free", verified: "Apr 2026" };
-  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", detail: "On 5-coach Voyagers, Coach B is usually unreserved. Some seats in Coach D may also be free.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Apr 2026" };
-  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", detail: "On 4-coach trains there is no dedicated unreserved coach. A small number of seats in Coach D are usually unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Apr 2026" };
+  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", detail: "On 9/10-coach trains, Coaches B, H and L are unreserved.", cardLabel: "💡 Coaches B, H, L may be free", verified: "Apr 2026" };
+  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", detail: "On 5-coach Voyagers, Coach B is usually unreserved. Some seats in Coach D may also be free.", cardLabel: "💡 Coach B may be free", verified: "Apr 2026" };
+  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", detail: "On 4-coach trains there is no dedicated unreserved coach. A small number of seats in Coach D are usually unreserved.", cardLabel: "💡 Coach D may be free", verified: "Apr 2026" };
 }
 
 const NO_RESERVATION_OPERATORS = new Set([
@@ -39,7 +173,7 @@ const COMPULSORY_RESERVATION = new Set(["Caledonian Sleeper"]);
 function isPeakHour() {
   const h = new Date().getHours(), m = new Date().getMinutes();
   const t = h * 60 + m;
-  return (t >= 420 && t <= 570) || (t >= 990 && t <= 1140); // 07:00-09:30 or 16:30-19:00
+  return (t >= 420 && t <= 570) || (t >= 990 && t <= 1140);
 }
 
 function getGuidance(operator, numVehicles) {
@@ -47,7 +181,10 @@ function getGuidance(operator, numVehicles) {
   return COACH_GUIDANCE[operator] || null;
 }
 
-// ── Recent Stations ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Recent Stations ──────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 function getRecent() {
   try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
   catch { return []; }
@@ -60,7 +197,10 @@ function saveRecent(station) {
   } catch {}
 }
 
-// ── API ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── API ──────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function fetchStations() {
   const r = await fetch(`${API_BASE}/stations`);
   if (!r.ok) throw new Error("Failed to fetch stations");
@@ -78,7 +218,6 @@ async function fetchDepartures(code) {
   const r = await fetch(`${API_BASE}/departures?code=${code}`);
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
-  // Filter to departures only — services with a departure object are leaving
   if (data.services) {
     data.services = data.services.filter(svc => svc.temporalData?.departure);
   } else {
@@ -87,7 +226,10 @@ async function fetchDepartures(code) {
   return data;
 }
 
-// ── Helpers ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Helpers ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 function fmtTime(iso) {
   if (!iso) return "--:--";
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -120,18 +262,15 @@ function getPlatform(svc) {
   const dep = svc.temporalData?.departure;
   const plat = svc.locationMetadata?.platform;
   if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "Cancelled" };
-  if (!plat) return { text: "\u2014", tier: "unknown", label: "Unknown" };
-  // actual = confirmed by signalling
+  if (!plat) return { text: "—", tier: "unknown", label: "Unknown" };
   if (plat.actual) {
     const changed = plat.planned && plat.actual !== plat.planned;
     if (changed) return { text: plat.actual, tier: "changed", label: "Changed" };
     return { text: plat.actual, tier: "confirmed", label: "Confirmed" };
   }
-  // forecast = expected but not yet confirmed
   if (plat.forecast) return { text: plat.forecast, tier: "expected", label: "Expected" };
-  // planned = timetabled only
   if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected" };
-  return { text: "\u2014", tier: "unknown", label: "Unknown" };
+  return { text: "—", tier: "unknown", label: "Unknown" };
 }
 
 function getEffectiveTime(svc) {
@@ -144,7 +283,10 @@ function getOperator(svc) { return svc.scheduleMetadata?.operator?.name || ""; }
 function nowHHMM() { return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }); }
 function svcKey(svc) { return `${getDestination(svc)}-${getScheduledTime(svc)}`; }
 
-// ── Styles ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Styles ───────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 function getCSS(dark) {
   const t = dark ? {
     bg:"#090913",bgCard:"#101020",bgCardHover:"#141428",bgInput:"#16162a",
@@ -221,14 +363,14 @@ function getCSS(dark) {
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
   .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
-  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
+  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:60px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
 
-  .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
-  .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+  .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:52px}
+  .countdown-num{font-size:20px;font-weight:900;letter-spacing:-.5px;line-height:1;font-variant-numeric:tabular-nums}
   .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
   .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
   .countdown-time{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;margin-top:2px}
@@ -244,16 +386,20 @@ function getCSS(dark) {
   .coach-pill-hint{color:var(--text-muted);background:transparent;border:1.5px dashed var(--border-light);padding:1px 6px}
   .coach-pill-free{color:var(--green);background:rgba(16,185,129,.1)}
   .coach-pill-none{color:var(--text-dim);background:transparent;border:1px solid var(--border);padding:1px 6px}
+  .plat-action-pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.3px;text-transform:uppercase}
+  .plat-action-board{background:rgba(16,185,129,.15);color:var(--green)}
+  .plat-action-approaching{background:rgba(99,102,241,.1);color:var(--accent)}
+  .plat-action-caution{background:rgba(245,158,11,.1);color:var(--amber)}
   .operator-name{font-size:11px;color:var(--text-dim)}
 
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
   .plat-badge{min-width:54px;height:54px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;letter-spacing:-.5px;padding:0 6px;font-variant-numeric:tabular-nums;position:relative}
   .plat-badge-icon{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;border:2px solid var(--bg)}
   .plat-icon-confirmed{background:#2d6a4f;color:#e8f5ec}
-  .plat-icon-changed{background:#9e5a6e;color:#fce8ee}
+  .plat-icon-changed{background:#e8623a;color:#fff}
   .plat-icon-expected{background:var(--border-light);color:var(--text-muted)}
   .plat-confirmed{background:#2d6a4f;color:#e8f5ec;box-shadow:0 1px 4px rgba(0,0,0,.1)}
-  .plat-changed{background:#9e5a6e;color:#fce8ee;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .plat-changed{background:#e8623a;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1)}
   .plat-expected{background:transparent;color:var(--text-muted);border:2px solid var(--border-light);font-size:20px}
   .plat-unknown{background:var(--bg-input);color:var(--text-dim);border:2px dashed var(--border-light);font-size:18px}
   .plat-cancelled{background:var(--bg-input);color:var(--text-dim);border:1.5px solid var(--border);font-size:12px;font-weight:700;opacity:.6}
@@ -266,10 +412,12 @@ function getCSS(dark) {
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
   .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
   .tip-platform{background:rgba(45,106,79,.06);border:1px solid rgba(45,106,79,.15)}
-  .tip-platform-changed{background:rgba(158,90,110,.08);border:1px solid rgba(158,90,110,.2)}
+  .tip-platform-changed{background:rgba(232,98,58,.08);border:1px solid rgba(232,98,58,.2)}
+  .tip-board{background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
   .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
   .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
+  .tip-cancelled{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.15)}
   .tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
   .tip-content{display:flex;flex-direction:column;gap:2px}
   .tip-title{font-size:12px;font-weight:700;color:var(--text)}
@@ -292,7 +440,7 @@ function getCSS(dark) {
   .legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);font-weight:500}
   .legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
   .legend-dot-confirmed{background:#2d6a4f}
-  .legend-dot-changed{background:#9e5a6e}
+  .legend-dot-changed{background:#e8623a}
   .legend-dot-expected{border:2px solid var(--border-light);background:transparent}
   .legend-dot-unknown{border:2px dashed var(--border-light);background:transparent}
 
@@ -311,13 +459,20 @@ function getCSS(dark) {
   `;
 }
 
-// ── Icons ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Icons ────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
 const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 
-function DepartureCard({ svc }) {
+// ══════════════════════════════════════════════════════════════════════════════
+// ── DepartureCard ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+function DepartureCard({ svc, allServices }) {
   const [expanded, setExpanded] = useState(false);
   const status = getStatus(svc);
   const plat = getPlatform(svc);
@@ -331,45 +486,56 @@ function DepartureCard({ svc }) {
   const guidance = getGuidance(operator, vehicles);
   const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
   const isCompulsory = COMPULSORY_RESERVATION.has(operator);
-  const hasAnyGuidance = guidance || isNoReservation || isCompulsory;
   const reasons = svc.reasons;
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
+
+  // ── Platform confirmation message (the new engine) ──
+  const platMsg = getPlatformMessage(svc, allServices);
+
+  // Map cardLabel to a pill style
+  const cardLabelStyle = platMsg.cardLabel
+    ? platMsg.tier === "board" ? "plat-action-board"
+      : platMsg.tier === "go-caution" ? "plat-action-caution"
+      : "plat-action-approaching"
+    : null;
 
   return (
     <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
       onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
       <div className="countdown-col">
+        <span className="countdown-num">{fmtTime(scheduled)}</span>
         {mins !== null && mins > 0 ? (
-          <><span className="countdown-num">{mins}</span><span className="countdown-unit">min</span></>
+          <span className="countdown-unit">{mins} min</span>
         ) : mins === 0 ? (
           <span className="countdown-due">Due</span>
-        ) : (
-          <span className="countdown-num" style={{fontSize:16}}>--</span>
-        )}
-        <span className="countdown-time">{fmtTime(scheduled)}</span>
+        ) : null}
       </div>
 
       <div className="info-col">
         <span className="dest-name">{dest}</span>
         <div className="meta-row">
           <span className={`status-badge status-${status.key}`}>{status.label}</span>
+          {/* Show urgent platform action pill on the card face */}
+          {platMsg.cardLabel && cardLabelStyle && (
+            <span className={`plat-action-pill ${cardLabelStyle}`}>{platMsg.cardLabel}</span>
+          )}
           {status.key !== "cancelled" && guidance && (
             <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{guidance.cardLabel}</span>
           )}
           {status.key !== "cancelled" && isNoReservation && (
-            <span className="coach-pill coach-pill-free">{"\u2705"} No reservations</span>
+            <span className="coach-pill coach-pill-free">✅ No reservations</span>
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
-            <span className="coach-pill coach-pill-none">{"\u2139\uFE0F"} No seating info</span>
+            <span className="coach-pill coach-pill-none">ℹ️ No seating info</span>
           )}
-          <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
+          <span className="operator-name">{operator}{vehicles ? ` · ${vehicles} coaches` : ""}</span>
         </div>
       </div>
 
       <div className="plat-col">
         <div className={`plat-badge plat-${plat.tier}`}>
           {plat.text}
-          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">{"\u2713"}</span>}
+          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">✓</span>}
           {plat.tier === "changed" && <span className="plat-badge-icon plat-icon-changed">!</span>}
           {plat.tier === "expected" && <span className="plat-badge-icon plat-icon-expected">?</span>}
         </div>
@@ -378,54 +544,21 @@ function DepartureCard({ svc }) {
 
       {expanded && (
         <div className="expanded-area">
-          {plat.tier === "expected" && (
-            <div className="tip-card tip-platform">
-              <span className="tip-icon">{"\uD83D\uDFE1"}</span>
+          {/* ── Platform confirmation tip (driven by messaging engine) ── */}
+          {platMsg.tier !== "cancelled" && (
+            <div className={`tip-card ${platMsg.tipClass}`}>
+              <span className="tip-icon">{platMsg.icon}</span>
               <div className="tip-content">
-                <span className="tip-title">Platform {plat.text} is expected</span>
-                <span className="tip-desc">Based on the timetable. We'll update this to confirmed once live signalling data comes through — stay on this page.</span>
-              </div>
-            </div>
-          )}
-          {plat.tier === "confirmed" && (
-            <div className="tip-card tip-platform">
-              <span className="tip-icon">{"\u2705"}</span>
-              <div className="tip-content">
-                <span className="tip-title">
-                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
-                    ? `Your train is at Platform ${plat.text}`
-                    : `Platform ${plat.text} confirmed — head there now`}
-                </span>
-                <span className="tip-desc">
-                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
-                    ? "This is your train — board now."
-                    : "Your train hasn't arrived yet. If there's already a train at this platform, don't board it — check the destination shown on the front of the train and wait for yours."}
-                </span>
-              </div>
-            </div>
-          )}
-          {plat.tier === "changed" && (
-            <div className="tip-card tip-platform-changed">
-              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
-              <div className="tip-content">
-                <span className="tip-title">
-                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
-                    ? `Platform changed — your train is at Platform ${plat.text}`
-                    : `Platform changed to ${plat.text} — head there now`}
-                </span>
-                <span className="tip-desc">
-                  {svc.temporalData?.departure?.status === "AT_PLATFORM"
-                    ? "Different from the timetable, but confirmed via live data. This is your train — board now."
-                    : "Different from the timetable — confirmed via live data. If there's already a train at this platform, don't board it — check the destination on the front and wait for yours."}
-                </span>
+                <span className="tip-title">{platMsg.title}</span>
+                <span className="tip-desc">{platMsg.description}</span>
               </div>
             </div>
           )}
 
-          {/* Seating guidance */}
+          {/* ── Seating guidance ── */}
           {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
             <div className="tip-card tip-coach">
-              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
+              <span className="tip-icon">💺</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
               </div>
@@ -433,10 +566,10 @@ function DepartureCard({ svc }) {
           )}
           {status.key !== "cancelled" && guidance && guidance.confidence === "hint" && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
+              <span className="tip-icon">💡</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
-                {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly.</span>}
+                {isPeakHour() && <span className="tip-peak">⏰ Peak time — unreserved seats fill quickly.</span>}
                 <div className="tip-meta">
                   {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
                   <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks! We'll review this."); }}>Report incorrect</button>
@@ -446,7 +579,7 @@ function DepartureCard({ svc }) {
           )}
           {status.key !== "cancelled" && isNoReservation && (
             <div className="tip-card tip-free">
-              <span className="tip-icon">{"\u2705"}</span>
+              <span className="tip-icon">✅</span>
               <div className="tip-content">
                 <span className="tip-title">No reservations — every seat is first come, first served.</span>
               </div>
@@ -454,7 +587,7 @@ function DepartureCard({ svc }) {
           )}
           {status.key !== "cancelled" && isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
+              <span className="tip-icon">⚠️</span>
               <div className="tip-content">
                 <span className="tip-title">Reservation required — check your booking for coach and seat.</span>
               </div>
@@ -462,7 +595,7 @@ function DepartureCard({ svc }) {
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\u2139\uFE0F"}</span>
+              <span className="tip-icon">ℹ️</span>
               <div className="tip-content">
                 <span className="tip-title">No seating info — look for unreserved seats when you get on the train.</span>
               </div>
@@ -499,6 +632,10 @@ function DepartureCard({ svc }) {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CompactLegend ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
 function CompactLegend() {
   return (
     <div className="legend-bar" role="legend" aria-label="Platform badge legend">
@@ -509,6 +646,10 @@ function CompactLegend() {
     </div>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── App ──────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 
 export default function App() {
   const [dark, setDark] = useState(() => {
@@ -627,12 +768,12 @@ export default function App() {
           <div className="toast-wrap" role="alert" aria-live="assertive">
             {toasts.map(t => (
               <div className="toast" key={t.id}>
-                <span className="toast-icon">{t.tier === "now-confirmed" ? "\u2705" : "\u26A0\uFE0F"}</span>
+                <span className="toast-icon">{t.tier === "now-confirmed" ? "✅" : "⚠️"}</span>
                 {t.tier === "now-confirmed"
                   ? <span>Platform {t.plat} now <strong>confirmed</strong> for {t.dest}</span>
                   : <span>Platform changed to <strong>{t.plat}</strong> for {t.dest}</span>
                 }
-                <button className="toast-close" onClick={() => dismissToast(t.id)}>{"\u2715"}</button>
+                <button className="toast-close" onClick={() => dismissToast(t.id)}>✕</button>
               </div>
             ))}
           </div>
@@ -680,7 +821,7 @@ export default function App() {
             )}
 
             <div className="donate-section" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK","_blank")} role="button" tabIndex={0}>
-              <span>{"\u2764\uFE0F"}</span>
+              <span>❤️</span>
               <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
             </div>
           </div>
@@ -695,7 +836,7 @@ export default function App() {
                 <span className="header-clock">{clock}</span>
               </div>
               <div className="header-row2">
-                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
+                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading…"}</span>
                 <div className="header-actions">
                   <button className="live-pill" onClick={() => station && loadDepartures(station.code)} aria-label="Refresh departures">
                     <span className="live-dot"/>LIVE
@@ -709,19 +850,19 @@ export default function App() {
             </div>
 
             {loading && !deps && (
-              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures{"\u2026"}</span></div>
+              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures…</span></div>
             )}
             {error && (
               <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => station && loadDepartures(station.code)}>Retry</button></div>
             )}
             {!loading && !error && deps && deps.length === 0 && (
-              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">No departures in the next hour</div></div>
+              <div className="empty-wrap"><div className="empty-icon">🚉</div><div className="empty-text">No departures in the next hour</div></div>
             )}
             {deps && deps.length > 0 && (
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc}/>)}
+                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={deps}/>)}
                 </div>
               </>
             )}
