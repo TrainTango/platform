@@ -4,6 +4,21 @@
     { "source": "/api/departures", "destination": "/api/departures" },
     { "source": "/api/service", "destination": "/api/service" },
     { "source": "/api/analytics", "destination": "/api/analytics" },
+    { "source": "/api/donate", "destination": "/api/donate" },
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
   ]
 }
