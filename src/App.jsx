@@ -425,14 +425,12 @@ function DepartureCard({ svc, allServices }) {
     <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
       onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
       <div className="countdown-col">
+        <span className="countdown-num">{fmtTime(scheduled)}</span>
         {mins !== null && mins > 0 ? (
-          <><span className="countdown-num">{mins}</span><span className="countdown-unit">min</span></>
+          <span className="countdown-unit">{mins} min</span>
         ) : mins === 0 ? (
           <span className="countdown-due">Due</span>
-        ) : (
-          <span className="countdown-num" style={{fontSize:16}}>--</span>
-        )}
-        <span className="countdown-time">{fmtTime(scheduled)}</span>
+        ) : null}
       </div>
 
       <div className="info-col">
