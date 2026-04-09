@@ -389,10 +389,10 @@ function getCSS(dark) {
   .modal-done-sub{font-size:13px;color:var(--text-muted);line-height:1.5;max-width:260px}
 
   /* ── Donation widget ── */
-  .donate-fab{position:fixed;bottom:18px;right:max(18px,calc((100vw - 480px) / 2 + 18px));width:52px;height:52px;border-radius:50%;background:#5F7FFF;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;z-index:90;box-shadow:0 4px 20px rgba(95,127,255,.45);transition:transform .2s,box-shadow .2s}
+  .donate-fab{position:fixed;bottom:24px;right:max(20px,calc((100vw - 480px) / 2 + 20px));width:44px;height:44px;border-radius:50%;background:#5F7FFF;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;z-index:90;box-shadow:0 4px 20px rgba(95,127,255,.45);transition:transform .2s,box-shadow .2s}
   .donate-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(95,127,255,.55)}
   .donate-fab:active{transform:scale(.95)}
-  .donate-tooltip{position:fixed;bottom:82px;right:max(18px,calc((100vw - 480px) / 2 + 18px));background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:13px;color:var(--text);max-width:210px;box-shadow:0 4px 16px var(--shadow);z-index:89;animation:toastIn .3s ease-out;line-height:1.4}
+  .donate-tooltip{position:fixed;bottom:78px;right:max(20px,calc((100vw - 480px) / 2 + 20px));background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:13px;color:var(--text);max-width:210px;box-shadow:0 4px 16px var(--shadow);z-index:89;animation:toastIn .3s ease-out;line-height:1.4}
   .donate-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeOverlay .2s ease-out}
   .donate-panel{width:100%;max-width:480px;background:var(--bg-card);border-radius:20px 20px 0 0;padding:12px 20px 40px;animation:slideUp .28s cubic-bezier(.32,1.1,.5,1);max-height:90vh;overflow-y:auto}
   .donate-handle{width:36px;height:4px;background:var(--border-light);border-radius:2px;margin:0 auto 16px}
@@ -402,8 +402,8 @@ function getCSS(dark) {
   .donate-close:hover{color:var(--text);background:var(--bg-input)}
   .donate-amount-row{display:flex;gap:8px;margin-bottom:10px;align-items:stretch}
   .donate-amount-input-wrap{flex:1;display:flex;align-items:center;background:var(--bg-input);border:1.5px solid #5F7FFF;border-radius:10px;padding:0 12px}
-  .donate-currency{font-size:16px;font-weight:700;color:var(--text);margin-right:4px}
-  .donate-amount-input{flex:1;background:none;border:none;outline:none;font-size:16px;font-family:inherit;color:var(--text);padding:12px 0;width:0}
+  .donate-currency{font-size:16px;font-weight:700;color:var(--text);margin-right:10px}
+  .donate-amount-input{flex:1;background:none;border:none;outline:none;font-size:14px;font-family:inherit;color:var(--text);padding:12px 0;width:0}
   .donate-amount-input::placeholder{color:var(--text-dim)}
   .donate-quick{padding:0 14px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:10px;font-size:14px;font-weight:700;color:var(--text-muted);cursor:pointer;font-family:inherit;transition:all .15s;white-space:nowrap}
   .donate-quick:hover,.donate-quick.active{border-color:#5F7FFF;color:#5F7FFF;background:rgba(95,127,255,.08)}
@@ -588,12 +588,12 @@ function DonationWidget({ dark }) {
     <>
       {showTooltip && !open && (
         <div className="donate-tooltip">
-          A Yorkshireman solving life's smallest problems, cheers! 🍺
+          Enjoying Platform? Help a Yorkshireman keep building
         </div>
       )}
 
       <button className="donate-fab" onClick={handleOpen} aria-label="Support this project">
-        <CoffeeIcon/>
+        ❤️
       </button>
 
       {open && (
