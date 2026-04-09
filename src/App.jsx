@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
-const FEEDBACK_DELAY_MS = 8 * 60 * 1000; // 8 min after effective departure
 
 // ── Analytics ──
 function getVisitorId() {
@@ -25,20 +24,20 @@ function trackEvent(type, data) {
 
 // ── Seating Guidance ──
 const COACH_GUIDANCE = {
-  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "🪑 Unreserved: C" },
-  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", cardLabel: "🪑 Unreserved: A" },
-  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", cardLabel: "💡 Coach C may be free", verified: "Mar 2026" },
-  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", cardLabel: "💡 Coach G may be free", verified: "Mar 2026" },
-  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
-  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
-  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", cardLabel: "💡 Coach B may be free", verified: "Mar 2026" },
-  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats — look for green lights above seats.", cardLabel: "💡 Limited unreserved", verified: "Mar 2026" },
+  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
+  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: A" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", cardLabel: "\uD83D\uDCA1 Coach C may be free", verified: "Mar 2026" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", cardLabel: "\uD83D\uDCA1 Coach G may be free", verified: "Mar 2026" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
+  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Mar 2026" },
+  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats \u2014 look for green lights above seats.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
 };
 
 function getCrossCountryGuidance(numVehicles) {
-  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", cardLabel: "💡 Coaches B, H, L may be free", verified: "Apr 2026" };
-  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", cardLabel: "💡 Coach B may be free", verified: "Apr 2026" };
-  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", cardLabel: "💡 Coach D may be free", verified: "Apr 2026" };
+  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", cardLabel: "\uD83D\uDCA1 Coaches B, H, L may be free", verified: "Apr 2026" };
+  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Apr 2026" };
+  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Apr 2026" };
 }
 
 const NO_RESERVATION_OPERATORS = new Set([
@@ -63,16 +62,16 @@ function getGuidance(operator, numVehicles) {
   return COACH_GUIDANCE[operator] || null;
 }
 
-// ── Recent Routes ──
+// ── Recent Stations ──
 function getRecent() {
-  try { const r = JSON.parse(localStorage.getItem("platform_recent_v2")); return Array.isArray(r) ? r.slice(0, 3) : []; }
+  try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
   catch { return []; }
 }
-function saveRecent(from, to) {
+function saveRecent(station) {
   try {
-    let r = getRecent().filter(rt => !(rt.from.code === from.code && (rt.to?.code || "") === (to?.code || "")));
-    r.unshift({ from, to: to || null });
-    localStorage.setItem("platform_recent_v2", JSON.stringify(r.slice(0, 3)));
+    let r = getRecent().filter(s => s.code !== station.code);
+    r.unshift(station);
+    localStorage.setItem("platform_recent", JSON.stringify(r.slice(0, 3)));
   } catch {}
 }
 
@@ -90,10 +89,8 @@ async function fetchStations() {
   return data;
 }
 
-async function fetchDepartures(code, toCode) {
-  let url = `${API_BASE}/departures?code=${code}`;
-  if (toCode) url += `&to=${toCode}`;
-  const r = await fetch(url);
+async function fetchDepartures(code) {
+  const r = await fetch(`${API_BASE}/departures?code=${code}`);
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
   const all = data.services || [];
@@ -106,13 +103,11 @@ function fmtTime(iso) {
   if (!iso) return "--:--";
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
-
 function minsUntil(iso) {
   if (!iso) return null;
   const diff = Math.round((new Date(iso) - new Date()) / 60000);
   return diff < 0 ? null : diff;
 }
-
 function relativeTime(date) {
   if (!date) return "";
   const s = Math.round((Date.now() - date.getTime()) / 1000);
@@ -120,7 +115,6 @@ function relativeTime(date) {
   if (s < 60) return `${s}s ago`;
   return `${Math.floor(s / 60)}m ago`;
 }
-
 function getStatus(svc) {
   const dep = svc.temporalData?.departure;
   if (!dep) return { key: "on-time", label: "On time" };
@@ -129,12 +123,11 @@ function getStatus(svc) {
   if (lat && lat > 0) return { key: "delayed", label: `+${lat} min` };
   return { key: "on-time", label: "On time" };
 }
-
 function getPlatform(svc) {
   const dep = svc.temporalData?.departure;
   const plat = svc.locationMetadata?.platform;
   if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "Cancelled" };
-  if (!plat) return { text: "—", tier: "unknown", label: "Unknown" };
+  if (!plat) return { text: "\u2014", tier: "unknown", label: "Unknown" };
   if (plat.actual) {
     const changed = plat.planned && plat.actual !== plat.planned;
     if (changed) return { text: plat.actual, tier: "changed", label: "Changed" };
@@ -142,9 +135,8 @@ function getPlatform(svc) {
   }
   if (plat.forecast) return { text: plat.forecast, tier: "expected", label: "Expected" };
   if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected" };
-  return { text: "—", tier: "unknown", label: "Unknown" };
+  return { text: "\u2014", tier: "unknown", label: "Unknown" };
 }
-
 function getEffectiveTime(svc) {
   const dep = svc.temporalData?.departure;
   return dep?.realtimeForecast || dep?.realtimeActual || dep?.scheduleAdvertised;
@@ -162,7 +154,7 @@ function svcKey(svc) {
   return uid || `${getDestination(svc)}-${getScheduledTime(svc)}`;
 }
 
-// ── Platform Messaging System ──
+// ── Platform Messaging ──
 const OCCUPYING_STATUSES = new Set(["AT_PLATFORM", "DEPART_PREPARING", "DEPART_READY", "ARRIVING"]);
 
 function isSameService(a, b) {
@@ -189,62 +181,30 @@ function checkPlatformOccupancy(userService, allServices) {
 function getPlatformMessage(userService, allServices) {
   const dep = userService.temporalData?.departure;
   const plat = userService.locationMetadata?.platform;
-
-  if (dep?.isCancelled) return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "❌", cardLabel: "Cancelled", tier: "cancelled", tipClass: "tip-hint" };
-
-  if (!plat || (!plat.actual && !plat.forecast && !plat.planned)) return { title: "No platform yet", description: "We'll show it here as soon as it's available.", icon: "⏳", cardLabel: "Unknown", tier: "unknown", tipClass: "tip-hint" };
-
+  if (dep?.isCancelled) return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "\u274C", cardLabel: "Cancelled", tier: "cancelled", tipClass: "tip-hint" };
+  if (!plat || (!plat.actual && !plat.forecast && !plat.planned)) return { title: "No platform yet", description: "We'll show it here as soon as it's available.", icon: "\u23F3", cardLabel: "Unknown", tier: "unknown", tipClass: "tip-hint" };
   const platNum = plat.actual || plat.forecast || plat.planned;
   const platTier = plat.actual ? (plat.planned && plat.actual !== plat.planned ? "changed" : "confirmed") : "expected";
   const isChanged = platTier === "changed";
-
-  if (platTier === "expected") return { title: `Platform ${platNum} expected`, description: "We'll update this once the platform is confirmed.", icon: "🟡", cardLabel: "Expected", tier: "expected", tipClass: "tip-platform" };
-
+  if (platTier === "expected") return { title: `Platform ${platNum} expected`, description: "We'll update this once the platform is confirmed.", icon: "\uD83D\uDFE1", cardLabel: "Expected", tier: "expected", tipClass: "tip-platform" };
   const departureStatus = dep?.status || null;
   const hasActualDep = !!dep?.realtimeActual;
-  if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "🚆", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
-
+  if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "\uD83D\uDE86", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
   const confirmed = departureStatus === "ARRIVING" || departureStatus === "AT_PLATFORM" || departureStatus === "DEPART_PREPARING" || departureStatus === "DEPART_READY";
-
   if (confirmed) {
-    return {
-      title: isChanged ? `Platform changed to ${platNum} — board now` : `Your train is at Platform ${platNum}`,
-      description: isChanged ? "Confirmed via live data. This is your train — board now." : "This is your train — board now.",
-      icon: isChanged ? "⚠️" : "✅",
-      cardLabel: isChanged ? "Changed" : "Board now",
-      tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
-    };
+    return { title: isChanged ? `Platform changed to ${platNum} \u2014 board now` : `Your train is at Platform ${platNum}`, description: isChanged ? "Confirmed via live data. This is your train \u2014 board now." : "This is your train \u2014 board now.", icon: isChanged ? "\u26A0\uFE0F" : "\u2705", cardLabel: isChanged ? "Changed" : "Board now", tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
   }
-
   const effective = dep?.realtimeForecast || dep?.scheduleAdvertised;
   const minsOut = effective ? Math.round((new Date(effective) - new Date()) / 60000) : null;
   const likelyHere = minsOut !== null && minsOut <= 3;
-
   if (likelyHere) {
-    return {
-      title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — check train`,
-      description: "Your train is likely here. Check the destination on the train before boarding.",
-      icon: isChanged ? "⚠️" : "🟡",
-      cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
-    };
+    return { title: isChanged ? `Platform changed to ${platNum} \u2014 check train` : `Platform ${platNum} \u2014 check train`, description: "Your train is likely here. Check the destination on the train before boarding.", icon: isChanged ? "\u26A0\uFE0F" : "\uD83D\uDFE1", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
   }
-
   const { occupied } = checkPlatformOccupancy(userService, allServices);
   if (occupied) {
-    return {
-      title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — another train there now`,
-      description: "A different service is at this platform. Check the destination on the train before boarding.",
-      icon: "🟡", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
-    };
+    return { title: isChanged ? `Platform changed to ${platNum} \u2014 check train` : `Platform ${platNum} \u2014 another train there now`, description: "A different service is at this platform. Check the destination on the train before boarding.", icon: "\uD83D\uDFE1", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
   }
-
-  return {
-    title: isChanged ? `Platform changed to ${platNum} — head there now` : `Platform ${platNum} confirmed — head there now`,
-    description: "Get there early and be first to board.",
-    icon: isChanged ? "⚠️" : "✅",
-    cardLabel: isChanged ? "Changed" : "Confirmed",
-    tier: "go", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
-  };
+  return { title: isChanged ? `Platform changed to ${platNum} \u2014 head there now` : `Platform ${platNum} confirmed \u2014 head there now`, description: "Get there early and be first to board.", icon: isChanged ? "\u26A0\uFE0F" : "\u2705", cardLabel: isChanged ? "Changed" : "Confirmed", tier: "go", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
 }
 
 // ── Styles ──
@@ -273,54 +233,40 @@ function getCSS(dark) {
   .app{max-width:480px;margin:0 auto;min-height:100vh;position:relative}
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
+  /* ── Search ── */
   .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
   .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
   .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
-
-  .search-fields{width:100%;display:flex;flex-direction:column;gap:8px}
-  .field-wrap{position:relative;width:100%}
-  .field-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .search-wrap{width:100%;position:relative}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
-  .search-input{width:100%;padding:14px 14px 14px 44px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:12px;color:var(--text);font-size:15px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
+  .search-input{width:100%;padding:16px 16px 16px 48px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
   .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
   .search-input::placeholder{color:var(--text-dim)}
-  .search-input-sm{padding:12px 14px 12px 40px;font-size:14px}
-  .dest-optional{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--text-dim);pointer-events:none}
-  .clear-dest{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--text-muted);cursor:pointer;font-family:inherit}
-
-  .go-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:4px;transition:opacity .2s}
-  .go-btn:hover{opacity:.9}
-  .go-btn:disabled{opacity:.4;cursor:default}
-
   .theme-toggle{position:absolute;top:20px;right:20px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;transition:border-color .2s}
   .theme-toggle:hover{border-color:var(--accent)}
 
-  .recent-section{width:100%;margin-top:16px}
+  .recent-section{width:100%;margin-top:20px}
   .recent-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
   .recent-list{display:flex;flex-direction:column;gap:6px}
-  .recent-btn{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:background .15s;min-height:48px}
+  .recent-btn{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:background .15s;min-height:48px}
   .recent-btn:hover{background:var(--bg-card-hover)}
-  .recent-route{display:flex;flex-direction:column;gap:2px}
-  .recent-from{font-size:14px;font-weight:600;color:var(--text)}
-  .recent-to{font-size:12px;color:var(--text-muted)}
-  .recent-codes{display:flex;gap:4px}
-  .recent-code{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:4px}
+  .recent-name{font-size:14px;font-weight:600;color:var(--text)}
+  .recent-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
 
-  .dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:240px;overflow-y:auto;box-shadow:0 12px 40px var(--shadow)}
-  .dropdown-item{padding:13px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border);min-height:44px}
+  .dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:320px;overflow-y:auto;box-shadow:0 12px 40px var(--shadow)}
+  .dropdown-item{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border);min-height:48px}
   .dropdown-item:last-child{border-bottom:none}
   .dropdown-item:hover{background:var(--accent-dim)}
-  .dropdown-name{font-size:13px;font-weight:500}
-  .dropdown-code{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:5px}
+  .dropdown-name{font-size:14px;font-weight:500}
+  .dropdown-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
 
+  /* ── Board ── */
   .board-screen{display:flex;flex-direction:column;min-height:100vh}
   .board-header{position:sticky;top:0;z-index:40;background:var(--header-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:12px 16px 0;border-bottom:1px solid var(--border)}
   .header-row1{display:flex;align-items:center;gap:8px}
   .back-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:12px;border-radius:10px;display:flex;align-items:center;min-width:44px;min-height:44px;justify-content:center;transition:all .2s}
   .back-btn:hover{color:var(--text);background:var(--accent-dim)}
-  .header-title{flex:1;min-width:0}
-  .station-name{font-size:17px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
-  .route-to{font-size:12px;color:var(--text-dim);font-weight:500}
+  .station-name{font-size:17px;font-weight:800;letter-spacing:-.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .header-clock{font-size:17px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
   .header-row2{display:flex;align-items:center;justify-content:space-between;padding-left:44px;margin-top:3px}
   .header-sub{font-size:11px;color:var(--text-dim)}
@@ -333,66 +279,25 @@ function getCSS(dark) {
   .refresh-bar{height:3px;background:var(--border);overflow:hidden}
   .refresh-fill{height:100%;background:var(--accent);transition:width 1s linear}
 
+  /* ── Toasts ── */
   .toast-wrap{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:6px;max-width:460px;width:calc(100% - 32px)}
   .toast{background:var(--orange);color:#fff;padding:12px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:8px;animation:toastIn .3s ease-out}
   @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
   .toast-icon{font-size:16px;flex-shrink:0}
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
-  .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
-  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s,box-shadow .2s}
+  /* ── Cards ── */
+  .card-list{padding:6px 10px 80px;display:flex;flex-direction:column;gap:6px}
+  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
 
-  /* ── Tracked card ── */
-  .dep-card.tracked{border-left-color:var(--accent);background:linear-gradient(160deg,rgba(99,102,241,.06),var(--bg-card));box-shadow:0 0 0 1.5px rgba(99,102,241,.2),0 4px 16px rgba(99,102,241,.08)}
-  .dep-card.tracked:hover{background:linear-gradient(160deg,rgba(99,102,241,.09),var(--bg-card-hover))}
-  .tracked-banner{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;padding-bottom:8px;border-bottom:1px solid rgba(99,102,241,.15)}
-  .tracked-label{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:5px}
-  .tracked-label-dot{width:6px;height:6px;background:var(--accent);border-radius:50%;animation:pulse 2s infinite}
-  .untrack-btn{font-size:11px;color:var(--text-dim);background:none;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:6px;transition:color .15s,background .15s;min-height:28px}
-  .untrack-btn:hover{color:var(--text-muted);background:var(--bg-input)}
-
-  /* ── Track journey button (in expanded area) ── */
-  .track-btn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px 16px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;width:100%;transition:opacity .2s;min-height:48px}
-  .track-btn:hover{opacity:.9}
-  .track-btn-sub{font-size:11px;font-weight:500;opacity:.8;display:block;margin-top:1px}
-  .tracking-status{display:flex;align-items:center;justify-content:space-between;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:10px 14px}
-  .tracking-status-left{display:flex;flex-direction:column;gap:2px}
-  .tracking-status-title{font-size:12px;font-weight:700;color:var(--accent)}
-  .tracking-status-sub{font-size:11px;color:var(--text-dim)}
-  .tracking-remove{font-size:12px;color:var(--text-dim);background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-family:inherit;font-weight:500;min-height:36px}
-  .tracking-remove:hover{color:var(--red);border-color:var(--red)}
-
-  /* ── Post-journey feedback sheet ── */
-  .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeOverlay .25s ease-out}
-  @keyframes fadeOverlay{from{opacity:0}to{opacity:1}}
-  .sheet{width:100%;max-width:480px;background:var(--bg-card);border-radius:20px 20px 0 0;padding:12px 20px 40px;animation:slideUp .3s cubic-bezier(.32,1.2,.5,1)}
-  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
-  .sheet-handle{width:36px;height:4px;background:var(--border-light);border-radius:2px;margin:0 auto 20px}
-  .sheet-eyebrow{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
-  .sheet-title{font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px;letter-spacing:-.4px;line-height:1.2}
-  .sheet-sub{font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.5}
-  .sheet-options{display:flex;flex-direction:column;gap:8px}
-  .sheet-option{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600;color:var(--text);transition:border-color .15s,background .15s;min-height:56px;text-align:left;width:100%}
-  .sheet-option:hover{border-color:var(--accent);background:var(--accent-dim)}
-  .sheet-option-emoji{font-size:22px;flex-shrink:0;width:28px;text-align:center}
-  .sheet-option-text{display:flex;flex-direction:column;gap:1px}
-  .sheet-option-label{font-size:14px;font-weight:700}
-  .sheet-option-desc{font-size:12px;font-weight:400;color:var(--text-muted)}
-  .sheet-skip{text-align:center;margin-top:14px;font-size:12px;color:var(--text-dim);cursor:pointer;background:none;border:none;font-family:inherit;width:100%;padding:8px;min-height:36px}
-  .sheet-skip:hover{color:var(--text-muted)}
-  .sheet-done{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 0}
-  .sheet-done-icon{font-size:40px}
-  .sheet-done-title{font-size:16px;font-weight:800;color:var(--text)}
-  .sheet-done-sub{font-size:13px;color:var(--text-muted);text-align:center;line-height:1.4}
-
   .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
   .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
-  .countdown-due{font-size:14px;font-weight:700;color:var(--green)}
-  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:2px}
+  .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
+  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
 
   .info-col{display:flex;flex-direction:column;gap:3px;min-width:0}
   .dest-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
@@ -469,69 +374,168 @@ function getCSS(dark) {
   .donate-section:hover{opacity:1}
   .donate-text{font-size:12px;color:var(--text-dim)}
   .donate-text strong{color:var(--text-muted)}
+
+  /* ── Floating feedback button ──
+     Tracks right edge of 480px container. On narrow viewports falls
+     back to 20px from the right edge of the screen.               */
+  .fab{
+    position:fixed;
+    bottom:24px;
+    right:max(20px, calc((100vw - 480px) / 2 + 20px));
+    width:44px;height:44px;
+    border-radius:50%;
+    background:var(--bg-card);
+    border:1.5px solid var(--border);
+    box-shadow:0 4px 16px var(--shadow);
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--text-dim);
+    z-index:90;
+    transition:transform .2s,box-shadow .2s,border-color .2s,color .2s;
+  }
+  .fab:hover{transform:scale(1.1);box-shadow:0 6px 24px var(--shadow);border-color:var(--accent);color:var(--accent)}
+  .fab:active{transform:scale(.96)}
+
+  /* ── Feedback modal ── */
+  .modal-overlay{
+    position:fixed;inset:0;
+    background:rgba(0,0,0,.5);
+    z-index:200;
+    display:flex;align-items:flex-end;justify-content:center;
+    animation:fadeOverlay .2s ease-out;
+  }
+  @keyframes fadeOverlay{from{opacity:0}to{opacity:1}}
+  .modal{
+    width:100%;max-width:480px;
+    background:var(--bg-card);
+    border-radius:20px 20px 0 0;
+    padding:12px 20px 40px;
+    animation:slideUp .28s cubic-bezier(.32,1.1,.5,1);
+  }
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .modal-handle{width:36px;height:4px;background:var(--border-light);border-radius:2px;margin:0 auto 18px}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .modal-title{font-size:18px;font-weight:800;color:var(--text);letter-spacing:-.3px}
+  .modal-close{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:20px;padding:4px;line-height:1;border-radius:6px;min-width:32px;min-height:32px;display:flex;align-items:center;justify-content:center}
+  .modal-close:hover{color:var(--text);background:var(--bg-input)}
+  .modal-sub{font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.4}
+
+  /* Rating row */
+  .rating-row{display:flex;gap:8px;margin-bottom:16px}
+  .rating-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 12px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:12px;cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s;min-height:72px}
+  .rating-btn:hover{border-color:var(--accent);background:var(--accent-dim)}
+  .rating-btn.selected-yes{border-color:var(--green);background:rgba(16,185,129,.08)}
+  .rating-btn.selected-no{border-color:var(--amber);background:rgba(245,158,11,.08)}
+  .rating-emoji{font-size:24px;line-height:1}
+  .rating-label{font-size:12px;font-weight:600;color:var(--text-muted)}
+  .rating-btn.selected-yes .rating-label{color:var(--green)}
+  .rating-btn.selected-no .rating-label{color:var(--amber)}
+
+  /* Comment field */
+  .comment-label{font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;display:block}
+  .comment-input{width:100%;padding:12px 14px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit;resize:none;outline:none;line-height:1.5;transition:border-color .2s,box-shadow .2s;margin-bottom:14px}
+  .comment-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+  .comment-input::placeholder{color:var(--text-dim)}
+
+  .submit-btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:11px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;transition:opacity .2s}
+  .submit-btn:hover{opacity:.9}
+  .submit-btn:disabled{opacity:.35;cursor:default}
+
+  /* Done state */
+  .modal-done{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0 8px;text-align:center}
+  .modal-done-icon{font-size:44px}
+  .modal-done-title{font-size:17px;font-weight:800;color:var(--text)}
+  .modal-done-sub{font-size:13px;color:var(--text-muted);line-height:1.5;max-width:260px}
   `;
 }
 
 // ── Icons ──
-const SearchIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
-const ArrowIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>;
-const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
-const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
-const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
+const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const BackIcon  = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
+const SunIcon   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
+const MoonIcon  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 
-// ── Post-Journey Feedback Sheet ──
-function FeedbackSheet({ data, onSubmit, onDismiss }) {
+// Speech-bubble icon for the FAB — deliberately simple and unbranded
+const ChatIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+);
+
+// ── Feedback Modal ──
+const PLACEHOLDERS = {
+  yes: "What's working well? Any suggestions?",
+  no:  "What could be better? We read every response.",
+  null: "Any comments or suggestions? (optional)",
+};
+
+function FeedbackModal({ onClose }) {
+  const [rating, setRating] = useState(null); // "yes" | "no"
+  const [comment, setComment] = useState("");
   const [done, setDone] = useState(false);
-  const [result, setResult] = useState(null);
 
-  function choose(r) {
-    setResult(r);
+  function submit() {
+    if (!rating) return;
+    trackEvent("product_feedback", { rating, comment: comment.trim() });
     setDone(true);
-    onSubmit(r);
+    // Auto-close after user has a moment to read the thanks
+    setTimeout(onClose, 2200);
   }
 
   return (
-    <div className="sheet-overlay" onClick={onDismiss}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle"/>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-handle"/>
         {done ? (
-          <div className="sheet-done">
-            <div className="sheet-done-icon">{result === "accurate" ? "🎯" : result === "wrong" ? "📋" : "👋"}</div>
-            <div className="sheet-done-title">Thanks for the feedback</div>
-            <div className="sheet-done-sub">This helps us improve platform accuracy for everyone.</div>
+          <div className="modal-done">
+            <div className="modal-done-icon">🙏</div>
+            <div className="modal-done-title">Thanks for the feedback</div>
+            <div className="modal-done-sub">It genuinely helps us improve Platform for everyone.</div>
           </div>
         ) : (
           <>
-            <div className="sheet-eyebrow">Journey feedback</div>
-            <div className="sheet-title">How did it go?</div>
-            <div className="sheet-sub">
-              Your {fmtTime(data.scheduledAt)} to {data.dest} has departed.
-              Was the platform info we showed accurate?
+            <div className="modal-header">
+              <span className="modal-title">Share feedback</span>
+              <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
             </div>
-            <div className="sheet-options">
-              <button className="sheet-option" onClick={() => choose("accurate")}>
-                <span className="sheet-option-emoji">✅</span>
-                <span className="sheet-option-text">
-                  <span className="sheet-option-label">Yes — platform was right</span>
-                  <span className="sheet-option-desc">The info matched what happened at the station</span>
-                </span>
+            <p className="modal-sub">Is Platform useful? Takes 20 seconds.</p>
+
+            {/* Rating */}
+            <div className="rating-row">
+              <button
+                className={`rating-btn ${rating === "yes" ? "selected-yes" : ""}`}
+                onClick={() => setRating(r => r === "yes" ? null : "yes")}
+              >
+                <span className="rating-emoji">👍</span>
+                <span className="rating-label">Yes, it helps</span>
               </button>
-              <button className="sheet-option" onClick={() => choose("wrong")}>
-                <span className="sheet-option-emoji">❌</span>
-                <span className="sheet-option-text">
-                  <span className="sheet-option-label">No — platform was wrong or changed</span>
-                  <span className="sheet-option-desc">The actual platform differed from what we showed</span>
-                </span>
-              </button>
-              <button className="sheet-option" onClick={() => choose("not_boarded")}>
-                <span className="sheet-option-emoji">👻</span>
-                <span className="sheet-option-text">
-                  <span className="sheet-option-label">I wasn't on this train</span>
-                  <span className="sheet-option-desc">Plans changed or I took a different service</span>
-                </span>
+              <button
+                className={`rating-btn ${rating === "no" ? "selected-no" : ""}`}
+                onClick={() => setRating(r => r === "no" ? null : "no")}
+              >
+                <span className="rating-emoji">👎</span>
+                <span className="rating-label">Needs work</span>
               </button>
             </div>
-            <button className="sheet-skip" onClick={onDismiss}>Skip for now</button>
+
+            {/* Comment */}
+            <label className="comment-label" htmlFor="fb-comment">Comments</label>
+            <textarea
+              id="fb-comment"
+              className="comment-input"
+              rows={3}
+              placeholder={PLACEHOLDERS[rating]}
+              value={comment}
+              onChange={e => setComment(e.target.value)}
+            />
+
+            <button
+              className="submit-btn"
+              disabled={!rating}
+              onClick={submit}
+            >
+              Send feedback
+            </button>
           </>
         )}
       </div>
@@ -540,47 +544,31 @@ function FeedbackSheet({ data, onSubmit, onDismiss }) {
 }
 
 // ── Departure Card ──
-function DepartureCard({ svc, allServices, stationCode, isTracked, onTrack, onUntrack }) {
-  const [expanded, setExpanded] = useState(isTracked); // Auto-expand when first tracked
-  const status = getStatus(svc);
-  const plat = getPlatform(svc);
-  const dest = getDestination(svc);
+function DepartureCard({ svc, allServices, stationCode }) {
+  const [expanded, setExpanded] = useState(false);
+  const status  = getStatus(svc);
+  const plat    = getPlatform(svc);
+  const dest    = getDestination(svc);
   const operator = getOperator(svc);
   const scheduled = getScheduledTime(svc);
   const effective = getEffectiveTime(svc);
-  const mins = minsUntil(effective);
+  const mins    = minsUntil(effective);
   const isDelayed = status.key === "delayed";
-  const vehicles = svc.locationMetadata?.numberOfVehicles;
-  const guidance = getGuidance(operator, vehicles);
+  const vehicles  = svc.locationMetadata?.numberOfVehicles;
+  const guidance  = getGuidance(operator, vehicles);
   const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
-  const isCompulsory = COMPULSORY_RESERVATION.has(operator);
-  const reasons = svc.reasons;
+  const isCompulsory    = COMPULSORY_RESERVATION.has(operator);
+  const reasons   = svc.reasons;
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
-  const platMsg = getPlatformMessage(svc, allServices);
-
-  // Sync expand state when tracking changes externally
-  useEffect(() => { if (isTracked) setExpanded(true); }, [isTracked]);
+  const platMsg   = getPlatformMessage(svc, allServices);
 
   return (
     <div
-      className={`dep-card ${status.key}${isTracked ? " tracked" : ""}`}
+      className={`dep-card ${status.key}`}
       role="button" tabIndex={0} aria-expanded={expanded}
       onClick={() => setExpanded(e => !e)}
       onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}
     >
-      {/* ── Tracked banner (visible even when collapsed) ── */}
-      {isTracked && (
-        <div className="tracked-banner" onClick={e => e.stopPropagation()}>
-          <span className="tracked-label">
-            <span className="tracked-label-dot"/>
-            Your train
-          </span>
-          <button className="untrack-btn" onClick={e => { e.stopPropagation(); onUntrack(); }}>
-            × Not my train
-          </button>
-        </div>
-      )}
-
       <div className="countdown-col">
         <span className="countdown-num">{fmtTime(scheduled)}</span>
         {mins !== null && mins > 0 ? (
@@ -598,28 +586,27 @@ function DepartureCard({ svc, allServices, stationCode, isTracked, onTrack, onUn
             <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{guidance.cardLabel}</span>
           )}
           {status.key !== "cancelled" && isNoReservation && (
-            <span className="coach-pill coach-pill-free">✅ No reservations</span>
+            <span className="coach-pill coach-pill-free">{"\u2705"} No reservations</span>
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
-            <span className="coach-pill coach-pill-none">ℹ️ No seating info</span>
+            <span className="coach-pill coach-pill-none">{"\u2139\uFE0F"} No seating info</span>
           )}
-          <span className="operator-name">{operator}{vehicles ? ` · ${vehicles} coaches` : ""}</span>
+          <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
         </div>
       </div>
 
       <div className="plat-col">
         <div className={`plat-badge plat-${plat.tier}`}>
           {plat.text}
-          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">✓</span>}
-          {plat.tier === "changed" && <span className="plat-badge-icon plat-icon-changed">!</span>}
-          {plat.tier === "expected" && <span className="plat-badge-icon plat-icon-expected">?</span>}
+          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">{"\u2713"}</span>}
+          {plat.tier === "changed"   && <span className="plat-badge-icon plat-icon-changed">!</span>}
+          {plat.tier === "expected"  && <span className="plat-badge-icon plat-icon-expected">?</span>}
         </div>
         <span className={`plat-status plat-status-${plat.tier}`}>{platMsg.cardLabel}</span>
       </div>
 
       {expanded && (
         <div className="expanded-area">
-          {/* Platform tip */}
           {platMsg.tier !== "unknown" && (
             <div className={`tip-card ${platMsg.tipClass}`}>
               <span className="tip-icon">{platMsg.icon}</span>
@@ -630,21 +617,18 @@ function DepartureCard({ svc, allServices, stationCode, isTracked, onTrack, onUn
             </div>
           )}
 
-          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
             <div className="tip-card tip-coach">
-              <span className="tip-icon">🪑</span>
-              <div className="tip-content">
-                <span className="tip-title">{guidance.short}</span>
-              </div>
+              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
+              <div className="tip-content"><span className="tip-title">{guidance.short}</span></div>
             </div>
           )}
           {status.key !== "cancelled" && guidance && guidance.confidence === "hint" && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">💡</span>
+              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
-                {isPeakHour() && <span className="tip-peak">⏰ Peak time — unreserved seats fill quickly.</span>}
+                {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly.</span>}
                 <div className="tip-meta">
                   {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
                   <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks! We'll review this."); }}>Report incorrect</button>
@@ -654,48 +638,21 @@ function DepartureCard({ svc, allServices, stationCode, isTracked, onTrack, onUn
           )}
           {status.key !== "cancelled" && isNoReservation && (
             <div className="tip-card tip-free">
-              <span className="tip-icon">✅</span>
-              <div className="tip-content">
-                <span className="tip-title">No reservations — every seat is first come, first served.</span>
-              </div>
+              <span className="tip-icon">{"\u2705"}</span>
+              <div className="tip-content"><span className="tip-title">No reservations — every seat is first come, first served.</span></div>
             </div>
           )}
           {status.key !== "cancelled" && isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">⚠️</span>
-              <div className="tip-content">
-                <span className="tip-title">Reservation required — check your booking for coach and seat.</span>
-              </div>
+              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
+              <div className="tip-content"><span className="tip-title">Reservation required — check your booking for coach and seat.</span></div>
             </div>
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">ℹ️</span>
-              <div className="tip-content">
-                <span className="tip-title">No seating info — look for unreserved seats when you board.</span>
-              </div>
+              <span className="tip-icon">{"\u2139\uFE0F"}</span>
+              <div className="tip-content"><span className="tip-title">No seating info — look for unreserved seats when you get on the train.</span></div>
             </div>
-          )}
-
-          {/* ── Track / Untrack CTA ── */}
-          {status.key !== "cancelled" && (
-            isTracked ? (
-              <div className="tracking-status" onClick={e => e.stopPropagation()}>
-                <div className="tracking-status-left">
-                  <span className="tracking-status-title">📍 Tracking your journey</span>
-                  <span className="tracking-status-sub">We'll ask how it went after you depart</span>
-                </div>
-                <button className="tracking-remove" onClick={e => { e.stopPropagation(); onUntrack(); }}>Remove</button>
-              </div>
-            ) : (
-              <button className="track-btn" onClick={e => { e.stopPropagation(); onTrack(svc); }}>
-                <span>📍</span>
-                <span>
-                  This is my train
-                  <span className="track-btn-sub">We'll check in after you've boarded</span>
-                </span>
-              </button>
-            )
           )}
 
           {cancelReason && <div className="cancel-reason">Reason: {cancelReason}</div>}
@@ -744,119 +701,32 @@ export default function App() {
   const [dark, setDark] = useState(() => {
     try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
   });
-  const [screen, setScreen] = useState("search");
+  const [screen, setScreen]   = useState("search");
   const [stations, setStations] = useState([]);
-
-  const [fromQuery, setFromQuery] = useState("");
-  const [fromStation, setFromStation] = useState(null);
-  const [fromFiltered, setFromFiltered] = useState([]);
-  const [showFromDrop, setShowFromDrop] = useState(false);
-
-  const [toQuery, setToQuery] = useState("");
-  const [toStation, setToStation] = useState(null);
-  const [toFiltered, setToFiltered] = useState([]);
-  const [showToDrop, setShowToDrop] = useState(false);
-
-  const [deps, setDeps] = useState(null);
+  const [query, setQuery]     = useState("");
+  const [filtered, setFiltered] = useState([]);
+  const [showDrop, setShowDrop] = useState(false);
+  const [station, setStation] = useState(null);
+  const [deps, setDeps]       = useState(null);
   const [allSvcs, setAllSvcs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError]     = useState(null);
   const [lastUpDate, setLastUpDate] = useState(null);
   const [lastUpText, setLastUpText] = useState("");
-  const [clock, setClock] = useState(nowHHMM());
+  const [clock, setClock]     = useState(nowHHMM());
   const [refreshPct, setRefreshPct] = useState(0);
-  const [toasts, setToasts] = useState([]);
-  const [recent, setRecent] = useState(getRecent);
+  const [toasts, setToasts]   = useState([]);
+  const [recent, setRecent]   = useState(getRecent);
 
-  // ── Journey tracking state ──
-  const [trackedJourney, setTrackedJourney] = useState(null); // { key, dest, operator, scheduledAt, effectiveAt, platform, stationCode }
-  const [feedbackSheet, setFeedbackSheet] = useState(null);   // same shape — shown post-departure
-  const feedbackTimerRef = useRef(null);
+  // Feedback modal — hidden once submitted for the session
+  const [showFeedback, setShowFeedback]       = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   const prevDepsRef = useRef(null);
-  const timerRef = useRef(null);
-  const clockRef = useRef(null);
-  const pctRef = useRef(null);
-  const fromRef = useRef(null);
-
-  // ── Schedule the post-journey feedback prompt ──
-  const scheduleFeedback = useCallback((data) => {
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    const base = data.effectiveAt || data.scheduledAt;
-    const triggerAt = new Date(base).getTime() + FEEDBACK_DELAY_MS;
-    const delay = Math.max(0, triggerAt - Date.now());
-    feedbackTimerRef.current = setTimeout(() => {
-      setFeedbackSheet(data);
-      try { localStorage.removeItem("platform_tracked_v1"); } catch {}
-    }, delay);
-  }, []);
-
-  // ── On mount: restore any pending tracked journey ──
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("platform_tracked_v1");
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      const base = data.effectiveAt || data.scheduledAt;
-      const triggerAt = new Date(base).getTime() + FEEDBACK_DELAY_MS;
-      if (Date.now() >= triggerAt) {
-        // Already past — show feedback immediately
-        setFeedbackSheet(data);
-        localStorage.removeItem("platform_tracked_v1");
-      } else {
-        // Restore tracking and reschedule
-        setTrackedJourney(data);
-        scheduleFeedback(data);
-      }
-    } catch {}
-  }, [scheduleFeedback]);
-
-  // ── Cleanup feedback timer on unmount ──
-  useEffect(() => () => { if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current); }, []);
-
-  // ── Track a journey ──
-  const trackJourney = useCallback((svc) => {
-    const scheduledAt = getScheduledTime(svc);
-    const effectiveAt = getEffectiveTime(svc) || scheduledAt;
-    const dest = getDestination(svc);
-    const operator = getOperator(svc);
-    const platform = getPlatform(svc).text;
-    const key = svcKey(svc);
-    const data = { key, dest, operator, scheduledAt, effectiveAt, platform };
-    setTrackedJourney(data);
-    try { localStorage.setItem("platform_tracked_v1", JSON.stringify(data)); } catch {}
-    scheduleFeedback(data);
-    trackEvent("journey_tracked", { dest, operator, platform, station_code: "" });
-  }, [scheduleFeedback]);
-
-  // ── Untrack ──
-  const untrackJourney = useCallback(() => {
-    setTrackedJourney(null);
-    try { localStorage.removeItem("platform_tracked_v1"); } catch {}
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    trackEvent("journey_untracked", {});
-  }, []);
-
-  // ── Submit post-journey feedback ──
-  const submitFeedback = useCallback((result) => {
-    trackEvent("journey_feedback", {
-      result,
-      dest: feedbackSheet?.dest,
-      operator: feedbackSheet?.operator,
-      platform: feedbackSheet?.platform,
-    });
-    // Dismiss after a short delay so user sees the "thank you" state
-    setTimeout(() => {
-      setFeedbackSheet(null);
-      setTrackedJourney(null);
-    }, 2000);
-  }, [feedbackSheet]);
-
-  const dismissFeedback = useCallback(() => {
-    trackEvent("journey_feedback", { result: "dismissed" });
-    setFeedbackSheet(null);
-    setTrackedJourney(null);
-  }, []);
+  const timerRef    = useRef(null);
+  const clockRef    = useRef(null);
+  const pctRef      = useRef(null);
+  const inputRef    = useRef(null);
 
   useEffect(() => {
     fetchStations().then(setStations).catch(err => console.error("Stations:", err));
@@ -872,18 +742,11 @@ export default function App() {
   }, [lastUpDate]);
 
   useEffect(() => {
-    if (!fromQuery.trim()) { setFromFiltered([]); setShowFromDrop(false); return; }
-    const q = fromQuery.toLowerCase();
-    setFromFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 6));
-    setShowFromDrop(true);
-  }, [fromQuery, stations]);
-
-  useEffect(() => {
-    if (!toQuery.trim()) { setToFiltered([]); setShowToDrop(false); return; }
-    const q = toQuery.toLowerCase();
-    setToFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).filter(s => s.code !== fromStation?.code).slice(0, 6));
-    setShowToDrop(true);
-  }, [toQuery, stations, fromStation]);
+    if (!query.trim()) { setFiltered([]); setShowDrop(false); return; }
+    const q = query.toLowerCase();
+    setFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 8));
+    setShowDrop(true);
+  }, [query, stations]);
 
   const detectChanges = useCallback((newServices) => {
     if (!prevDepsRef.current) { prevDepsRef.current = newServices; return; }
@@ -891,7 +754,7 @@ export default function App() {
     prevDepsRef.current.forEach(s => { oldMap[svcKey(s)] = getPlatform(s); });
     const newToasts = [];
     newServices.forEach(s => {
-      const key = svcKey(s);
+      const key  = svcKey(s);
       const oldP = oldMap[key];
       const newP = getPlatform(s);
       if (oldP && newP.text !== oldP.text && newP.tier !== "unknown" && newP.tier !== "cancelled") {
@@ -907,10 +770,10 @@ export default function App() {
     prevDepsRef.current = newServices;
   }, []);
 
-  const loadDepartures = useCallback(async (code, toCode) => {
+  const loadDepartures = useCallback(async (code) => {
     setLoading(true); setError(null);
     try {
-      const data = await fetchDepartures(code, toCode);
+      const data = await fetchDepartures(code);
       const svcs = data.departures;
       setAllSvcs(data.allServices);
       detectChanges(svcs);
@@ -923,46 +786,27 @@ export default function App() {
     finally { setLoading(false); }
   }, [detectChanges]);
 
-  const go = useCallback(() => {
-    if (!fromStation) return;
-    saveRecent(fromStation, toStation);
-    setRecent(getRecent());
+  const selectStation = useCallback((s) => {
+    setStation(s); setQuery(""); setShowDrop(false);
+    saveRecent(s); setRecent(getRecent());
     prevDepsRef.current = null;
-    trackEvent("station_search", { station_code: fromStation.code, station_name: fromStation.name, destination_code: toStation?.code || "", destination_name: toStation?.name || "" });
-    setScreen("board");
-    loadDepartures(fromStation.code, toStation?.code);
-  }, [fromStation, toStation, loadDepartures]);
-
-  const selectFrom = s => { setFromStation(s); setFromQuery(s.name); setShowFromDrop(false); };
-  const selectTo = s => { setToStation(s); setToQuery(s.name); setShowToDrop(false); };
-
-  const selectRecent = rt => {
-    setFromStation(rt.from); setFromQuery(rt.from.name);
-    if (rt.to) { setToStation(rt.to); setToQuery(rt.to.name); }
-    else { setToStation(null); setToQuery(""); }
-    saveRecent(rt.from, rt.to);
-    setRecent(getRecent());
-    prevDepsRef.current = null;
-    trackEvent("station_search", { station_code: rt.from.code, station_name: rt.from.name, destination_code: rt.to?.code || "", destination_name: rt.to?.name || "" });
-    setScreen("board");
-    loadDepartures(rt.from.code, rt.to?.code);
-  };
+    trackEvent("station_search", { station_code: s.code, station_name: s.name });
+    setScreen("board"); loadDepartures(s.code);
+  }, [loadDepartures]);
 
   useEffect(() => {
-    if (screen !== "board" || !fromStation) return;
+    if (screen !== "board" || !station) return;
     let elapsed = 0;
     pctRef.current = setInterval(() => { elapsed += 1000; setRefreshPct(Math.min((elapsed / REFRESH_INTERVAL) * 100, 100)); }, 1000);
-    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(fromStation.code, toStation?.code); }, REFRESH_INTERVAL);
+    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(station.code); }, REFRESH_INTERVAL);
     return () => { clearInterval(timerRef.current); clearInterval(pctRef.current); };
-  }, [screen, fromStation, toStation, loadDepartures]);
+  }, [screen, station, loadDepartures]);
 
   const goBack = () => {
     setScreen("search"); setDeps(null); setAllSvcs([]); setError(null); setToasts([]);
     clearInterval(timerRef.current); clearInterval(pctRef.current);
     prevDepsRef.current = null;
-    setTimeout(() => fromRef.current?.focus(), 100);
-    // Note: we do NOT clear trackedJourney or the feedback timer here.
-    // The feedback prompt can appear over the search screen — that's fine.
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const dismissToast = id => setToasts(t => t.filter(x => x.id !== id));
@@ -973,39 +817,53 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toasts]);
 
-  // ── Sort departures: tracked journey always floats to top ──
-  const sortedDeps = deps
-    ? [...deps].sort((a, b) => {
-        const aT = trackedJourney && svcKey(a) === trackedJourney.key ? -1 : 0;
-        const bT = trackedJourney && svcKey(b) === trackedJourney.key ? -1 : 0;
-        return aT - bT;
-      })
-    : [];
+  function handleFeedbackClose() {
+    setShowFeedback(false);
+    // Mark submitted so FAB disappears — checked inside FeedbackModal on submit
+    // We track submission inside FeedbackModal; here we just handle the close trigger
+  }
 
   return (
     <>
       <style>{getCSS(dark)}</style>
       <div className="app">
 
-        {/* ── Post-journey feedback sheet (global overlay) ── */}
-        {feedbackSheet && (
-          <FeedbackSheet data={feedbackSheet} onSubmit={submitFeedback} onDismiss={dismissFeedback}/>
-        )}
-
-        {/* ── Platform change toasts ── */}
+        {/* ── Toasts ── */}
         {toasts.length > 0 && (
           <div className="toast-wrap" role="alert" aria-live="assertive">
             {toasts.map(t => (
               <div className="toast" key={t.id}>
-                <span className="toast-icon">{t.tier === "now-confirmed" ? "✅" : "⚠️"}</span>
+                <span className="toast-icon">{t.tier === "now-confirmed" ? "\u2705" : "\u26A0\uFE0F"}</span>
                 {t.tier === "now-confirmed"
                   ? <span>Platform {t.plat} now <strong>confirmed</strong> for {t.dest}</span>
                   : <span>Platform changed to <strong>{t.plat}</strong> for {t.dest}</span>
                 }
-                <button className="toast-close" onClick={() => dismissToast(t.id)}>✕</button>
+                <button className="toast-close" onClick={() => dismissToast(t.id)}>{"\u2715"}</button>
               </div>
             ))}
           </div>
+        )}
+
+        {/* ── Feedback modal ── */}
+        {showFeedback && (
+          <FeedbackModal
+            onClose={() => {
+              setShowFeedback(false);
+              setFeedbackSubmitted(true);
+            }}
+          />
+        )}
+
+        {/* ── Floating feedback button — hidden after submission ── */}
+        {!feedbackSubmitted && !showFeedback && (
+          <button
+            className="fab"
+            aria-label="Share feedback"
+            title="Share feedback"
+            onClick={() => setShowFeedback(true)}
+          >
+            <ChatIcon/>
+          </button>
         )}
 
         {/* ── Search screen ── */}
@@ -1016,68 +874,41 @@ export default function App() {
             </button>
             <div className="logo">Platform</div>
             <div className="tagline">Live platforms and seat guidance</div>
-
-            <div className="search-fields">
-              <div className="field-wrap">
-                <div className="search-icon"><SearchIcon/></div>
-                <input ref={fromRef} className="search-input" placeholder="Departing from?"
-                  value={fromQuery} onChange={e => { setFromQuery(e.target.value); setFromStation(null); }}
-                  onFocus={() => { if (fromFiltered.length) setShowFromDrop(true); }}
-                  onBlur={() => setTimeout(() => setShowFromDrop(false), 200)}
-                  autoComplete="off" aria-label="Departure station"/>
-                {showFromDrop && fromFiltered.length > 0 && (
-                  <div className="dropdown" role="listbox">
-                    {fromFiltered.map(s => (
-                      <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectFrom(s)}>
-                        <span className="dropdown-name">{s.name}</span>
-                        <span className="dropdown-code">{s.code}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="field-wrap">
-                <div className="search-icon"><ArrowIcon/></div>
-                <input className="search-input search-input-sm" placeholder="Going to? (optional)"
-                  value={toQuery} onChange={e => { setToQuery(e.target.value); setToStation(null); }}
-                  onFocus={() => { if (toFiltered.length) setShowToDrop(true); }}
-                  onBlur={() => setTimeout(() => setShowToDrop(false), 200)}
-                  autoComplete="off" aria-label="Destination station (optional)"/>
-                {!toQuery && <span className="dest-optional">optional</span>}
-                {toStation && <button className="clear-dest" onMouseDown={e => { e.preventDefault(); setToStation(null); setToQuery(""); }}>Clear</button>}
-                {showToDrop && toFiltered.length > 0 && (
-                  <div className="dropdown" role="listbox">
-                    {toFiltered.map(s => (
-                      <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectTo(s)}>
-                        <span className="dropdown-name">{s.name}</span>
-                        <span className="dropdown-code">{s.code}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <button className="go-btn" disabled={!fromStation} onClick={go}>
-                {fromStation ? (toStation ? `Show trains to ${toStation.name}` : `Show departures from ${fromStation.name}`) : "Select a station"}
-              </button>
+            <div className="search-wrap" role="combobox" aria-expanded={showDrop} aria-haspopup="listbox">
+              <div className="search-icon"><SearchIcon/></div>
+              <input
+                ref={inputRef}
+                className="search-input"
+                placeholder="Where are you departing from?"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onFocus={() => { if (filtered.length) setShowDrop(true); }}
+                onBlur={() => setTimeout(() => setShowDrop(false), 200)}
+                autoComplete="off"
+                aria-label="Search stations"
+                role="searchbox"
+              />
+              {showDrop && filtered.length > 0 && (
+                <div className="dropdown" role="listbox">
+                  {filtered.map(s => (
+                    <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectStation(s)}>
+                      <span className="dropdown-name">{s.name}</span>
+                      <span className="dropdown-code">{s.code}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {recent.length > 0 && !fromQuery && !toQuery && (
+            {recent.length > 0 && !query && (
               <div className="recent-section">
-                <div className="recent-label">Recent</div>
+                <div className="recent-label">Recent stations</div>
                 <div className="recent-list">
-                  {recent.map((rt, i) => (
-                    <div key={i} className="recent-btn" role="button" tabIndex={0}
-                      onClick={() => selectRecent(rt)} onKeyDown={e => e.key === "Enter" && selectRecent(rt)}>
-                      <div className="recent-route">
-                        <span className="recent-from">{rt.from.name}</span>
-                        {rt.to && <span className="recent-to">to {rt.to.name}</span>}
-                      </div>
-                      <div className="recent-codes">
-                        <span className="recent-code">{rt.from.code}</span>
-                        {rt.to && <span className="recent-code">{rt.to.code}</span>}
-                      </div>
+                  {recent.map(s => (
+                    <div key={s.code} className="recent-btn" role="button" tabIndex={0}
+                      onClick={() => selectStation(s)} onKeyDown={e => e.key === "Enter" && selectStation(s)}>
+                      <span className="recent-name">{s.name}</span>
+                      <span className="recent-code">{s.code}</span>
                     </div>
                   ))}
                 </div>
@@ -1085,7 +916,7 @@ export default function App() {
             )}
 
             <div className="donate-section" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK","_blank")} role="button" tabIndex={0}>
-              <span>❤️</span>
+              <span>{"\u2764\uFE0F"}</span>
               <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
             </div>
           </div>
@@ -1097,16 +928,13 @@ export default function App() {
             <div className="board-header">
               <div className="header-row1">
                 <button className="back-btn" onClick={goBack} aria-label="Back to search"><BackIcon/></button>
-                <div className="header-title">
-                  <span className="station-name">{fromStation?.name}</span>
-                  {toStation && <span className="route-to">to {toStation.name}</span>}
-                </div>
+                <span className="station-name">{station?.name}</span>
                 <span className="header-clock">{clock}</span>
               </div>
               <div className="header-row2">
-                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading…"}</span>
+                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
                 <div className="header-actions">
-                  <button className="live-pill" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)} aria-label="Refresh departures">
+                  <button className="live-pill" onClick={() => station && loadDepartures(station.code)} aria-label="Refresh departures">
                     <span className="live-dot"/>LIVE
                   </button>
                   <button className="theme-btn-sm" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
@@ -1118,28 +946,26 @@ export default function App() {
             </div>
 
             {loading && !deps && (
-              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures…</span></div>
+              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures{"\u2026"}</span></div>
             )}
             {error && (
-              <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)}>Retry</button></div>
+              <div className="error-wrap">
+                <div className="error-msg">Unable to load departures</div>
+                <button className="retry-btn" onClick={() => station && loadDepartures(station.code)}>Retry</button>
+              </div>
             )}
             {!loading && !error && deps && deps.length === 0 && (
-              <div className="empty-wrap"><div className="empty-icon">🚉</div><div className="empty-text">{toStation ? `No trains to ${toStation.name} in the next hour` : "No departures in the next hour"}</div></div>
+              <div className="empty-wrap">
+                <div className="empty-icon">{"\uD83D\uDE89"}</div>
+                <div className="empty-text">No departures in the next hour</div>
+              </div>
             )}
-            {sortedDeps.length > 0 && (
+            {deps && deps.length > 0 && (
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {sortedDeps.map((svc, i) => (
-                    <DepartureCard
-                      key={svcKey(svc) || i}
-                      svc={svc}
-                      allServices={allSvcs}
-                      stationCode={fromStation?.code}
-                      isTracked={!!trackedJourney && svcKey(svc) === trackedJourney.key}
-                      onTrack={trackJourney}
-                      onUntrack={untrackJourney}
-                    />
+                  {deps.map((svc, i) => (
+                    <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={station?.code}/>
                   ))}
                 </div>
               </>
