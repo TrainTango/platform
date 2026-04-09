@@ -381,7 +381,7 @@ function getCSS(dark) {
   .fab{
     position:fixed;
     bottom:24px;
-    right:max(20px, calc((100vw - 480px) / 2 + 20px));
+    left:max(20px, calc((100vw - 480px) / 2 + 20px));
     width:44px;height:44px;
     border-radius:50%;
     background:var(--bg-card);
@@ -722,6 +722,26 @@ export default function App() {
   const [showFeedback, setShowFeedback]       = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  // ── Buy Me a Coffee widget ──
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js";
+    script.setAttribute("data-name", "BMC-Widget");
+    script.setAttribute("data-cfasync", "false");
+    script.setAttribute("data-id", "buffalobuild");
+    script.setAttribute("data-description", "Support me on Buy me a coffee!");
+    script.setAttribute("data-message", "A Yorkshireman solving life\u2019s smallest problems \u2014 cheers! \u2615");
+    script.setAttribute("data-color", "#5F7FFF");
+    script.setAttribute("data-position", "Right");
+    script.setAttribute("data-x_margin", "18");
+    script.setAttribute("data-y_margin", "18");
+    document.head.appendChild(script);
+    return () => {
+      try { document.head.removeChild(script); } catch {}
+      document.getElementById("bmc-wbtn")?.remove();
+    };
+  }, []);
+
   const prevDepsRef = useRef(null);
   const timerRef    = useRef(null);
   const clockRef    = useRef(null);
@@ -915,10 +935,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="donate-section" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK","_blank")} role="button" tabIndex={0}>
-              <span>{"\u2764\uFE0F"}</span>
-              <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
-            </div>
+
           </div>
         )}
 
