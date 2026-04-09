@@ -21,25 +21,30 @@ async function getAccessToken() {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=15');
-  if (req.method === 'OPTIONS') return res.status(200).end();
 
   const code = (req.query.code || '').toUpperCase().trim();
-  if (!code || code.length < 2 || code.length > 5) {
-    return res.status(400).json({ error: 'Invalid station code' });
-  }
 
   try {
     const token = await getAccessToken();
-    const response = await fetch(`${RTT_BASE}/gb-nr/location?code=${code}`, {
+
+    // First check what entitlements we have
+    const infoRes = await fetch(`${RTT_BASE}/api/info`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (response.status === 204) return res.status(200).json({ services: [] });
-    if (!response.ok) throw new Error(`RTT: ${response.status}`);
-    const data = await response.json();
-    return res.status(200).json(data);
+    const info = await infoRes.json();
+
+    // Try generic endpoint instead of gb-nr
+    const rttRes = await fetch(`${RTT_BASE}/rtt/location?code=${code}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const rttData = rttRes.status === 204 ? { services: [] } : await rttRes.json();
+
+    return res.status(200).json({
+      debug_info: info,
+      debug_rtt_status: rttRes.status,
+      ...rttData
+    });
   } catch (err) {
-    console.error('Departures error:', err.message);
     return res.status(502).json({ error: err.message });
   }
 }
