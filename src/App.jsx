@@ -219,6 +219,8 @@ function getCSS(dark) {
   .status-delayed{background:rgba(245,158,11,.1);color:var(--amber)}
   .status-cancelled{background:rgba(239,68,68,.1);color:var(--red)}
   .coach-pill{font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-dim);padding:2px 7px;border-radius:5px}
+  .coach-pill-hint{color:var(--text-muted);background:var(--bg-input);font-style:italic}
+  .coach-pill-free{color:var(--green);background:rgba(16,185,129,.1)}
   .operator-name{font-size:11px;color:var(--text-dim)}
 
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
@@ -245,10 +247,14 @@ function getCSS(dark) {
   .tip-platform{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15)}
   .tip-platform-changed{background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
+  .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
+  .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
   .tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
   .tip-content{display:flex;flex-direction:column;gap:2px}
   .tip-title{font-size:12px;font-weight:700;color:var(--text)}
   .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
+  .tip-hint .tip-title{color:var(--text-muted)}
+  .tip-hint .tip-desc{font-style:italic}
 
   .detail-row{display:flex;gap:16px;flex-wrap:wrap}
   .detail-item{display:flex;flex-direction:column;gap:1px}
@@ -300,6 +306,9 @@ function DepartureCard({ svc }) {
   const mins = minsUntil(effective);
   const isDelayed = status.key === "delayed";
   const guidance = COACH_GUIDANCE[operator];
+  const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
+  const isCompulsory = COMPULSORY_RESERVATION.has(operator);
+  const isLumo = operator === "Lumo";
   const reasons = svc.reasons;
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
 
@@ -321,8 +330,15 @@ function DepartureCard({ svc }) {
         <span className="dest-name">{dest}</span>
         <div className="meta-row">
           <span className={`status-badge status-${status.key}`}>{status.label}</span>
-          {guidance && status.key !== "cancelled" && (
-            <span className="coach-pill" title={guidance.tip}>{"\uD83D\uDCBA"} {guidance.coaches}</span>
+          {status.key !== "cancelled" && guidance && (
+            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}
+              title={guidance.tip}>{"\uD83D\uDCBA"} {guidance.cardLabel}</span>
+          )}
+          {status.key !== "cancelled" && isNoReservation && (
+            <span className="coach-pill coach-pill-free" title="This operator doesn't use reservations">{"\u2705"} Sit anywhere</span>
+          )}
+          {status.key !== "cancelled" && isLumo && (
+            <span className="coach-pill coach-pill-hint" title={LUMO_GUIDANCE.tip}>{"\uD83D\uDCBA"} {LUMO_GUIDANCE.cardLabel}</span>
           )}
           <span className="operator-name">{operator}</span>
         </div>
@@ -368,12 +384,44 @@ function DepartureCard({ svc }) {
             </div>
           )}
 
-          {guidance && status.key !== "cancelled" && (
-            <div className="tip-card tip-coach">
-              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
+          {/* Seating guidance */}
+          {status.key !== "cancelled" && guidance && (
+            <div className={`tip-card ${guidance.confidence === "high" ? "tip-coach" : "tip-hint"}`}>
+              <span className="tip-icon">{guidance.confidence === "high" ? "\uD83D\uDCBA" : "\uD83D\uDCA1"}</span>
               <div className="tip-content">
-                <span className="tip-title">Unreserved: Coach{guidance.coaches.includes("&") ? "es" : ""} {guidance.coaches}</span>
+                <span className="tip-title">
+                  {guidance.confidence === "high"
+                    ? `Unreserved: Coach ${guidance.coaches}`
+                    : `Seating hint: Coach ${guidance.coaches}`}
+                </span>
                 <span className="tip-desc">{guidance.tip}</span>
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && isNoReservation && (
+            <div className="tip-card tip-free">
+              <span className="tip-icon">{"\u2705"}</span>
+              <div className="tip-content">
+                <span className="tip-title">No reservations on {operator}</span>
+                <span className="tip-desc">This operator doesn't use seat reservations. Every seat is unreserved — just board and sit anywhere.</span>
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && isLumo && (
+            <div className="tip-card tip-hint">
+              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Limited unreserved seats</span>
+                <span className="tip-desc">{LUMO_GUIDANCE.tip}</span>
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && isCompulsory && (
+            <div className="tip-card tip-hint">
+              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
+              <div className="tip-content">
+                <span className="tip-title">Reservation required</span>
+                <span className="tip-desc">This operator requires a reservation for all seats. Check your booking confirmation for your coach and seat number.</span>
               </div>
             </div>
           )}
