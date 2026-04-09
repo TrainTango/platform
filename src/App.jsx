@@ -3,17 +3,32 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 
-// ── Unreserved Coach Guidance ──
+// ── Seating Guidance (tiered by confidence) ──
 const COACH_GUIDANCE = {
-  "LNER": { coaches: "C & U", tip: "Coaches C and U are unreserved. Coach C is usually mid-train." },
-  "Avanti West Coast": { coaches: "A & L", tip: "Coaches A and L are typically unreserved. Coach A is at the rear." },
-  "CrossCountry": { coaches: "A", tip: "Coach A is usually unreserved, located at the rear." },
-  "Great Western Railway": { coaches: "C & L", tip: "Coaches C and L are often unreserved on intercity services." },
-  "TransPennine Express": { coaches: "A & B", tip: "Coaches A and B are typically unreserved." },
-  "East Midlands Railway": { coaches: "A & B", tip: "Coaches A and B are usually unreserved on intercity services." },
+  "LNER": { confidence: "high", coaches: "C", tip: "Coach C is always the unreserved coach on LNER. It's towards the north end on 9/10-car Azumas, or mid-train on 5-car services.", cardLabel: "Unreserved: C" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", tip: "Coach C is often unreserved. On 11-car Pendolinos, Coach U may also be unreserved. Coach G on refurbished trains is also unreserved. This can vary — check platform displays.", cardLabel: "Often unreserved: C" },
+  "CrossCountry": { confidence: "hint", coaches: "B or D", tip: "On 5 or 9-coach trains, Coach B is usually unreserved. On 4 or 8-coach trains, some seats in Coach D are unreserved. This changed in June 2024 — check platform displays.", cardLabel: "Often unreserved: B" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", tip: "Coach G is usually unreserved on London services. Non-London services are fully unreserved. This can vary — check platform displays.", cardLabel: "Often unreserved: G" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on London services. Non-London services and Corby 'Connect' services are fully unreserved.", cardLabel: "Often unreserved: D" },
+  "Hull Trains": { confidence: "high", coaches: "A", tip: "Coach A is always the unreserved coach on Hull Trains.", cardLabel: "Unreserved: A" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", tip: "Coach D is usually unreserved on Nova trains. On Class 185 trains, some seats in Coaches A and B are unreserved. This can vary.", cardLabel: "Often unreserved: D" },
+  "Grand Central": { confidence: "hint", coaches: "B", tip: "Part of Coach B is usually unreserved on Sunderland services. On Bradford services, unreserved seats are spread throughout.", cardLabel: "Partially unreserved: B" },
 };
 
-// ── Recent Stations (persisted) ──
+const NO_RESERVATION_OPERATORS = new Set([
+  "c2c", "Chiltern Railways", "Elizabeth line", "Gatwick Express",
+  "Great Northern", "Greater Anglia", "Heathrow Express",
+  "London Northwestern Railway", "London Overground", "Merseyrail",
+  "Northern", "South Western Railway", "Southeastern", "Southern",
+  "Stansted Express", "Thameslink", "Transport for Wales",
+  "West Midlands Railway",
+]);
+
+const COMPULSORY_RESERVATION = new Set(["Caledonian Sleeper"]);
+
+const LUMO_GUIDANCE = { confidence: "hint", tip: "Lumo has very limited unreserved seats, marked with a green light. There is no dedicated unreserved coach.", cardLabel: "Limited unreserved" };
+
+// ── Recent Stations ──
 function getRecent() {
   try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
   catch { return []; }
@@ -44,8 +59,11 @@ async function fetchDepartures(code) {
   const r = await fetch(`${API_BASE}/departures?code=${code}`);
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
+  // Filter to departures only — services with a departure object are leaving
   if (data.services) {
     data.services = data.services.filter(svc => svc.temporalData?.departure);
+  } else {
+    data.services = [];
   }
   return data;
 }
@@ -62,12 +80,6 @@ function minsUntil(iso) {
   return diff < 0 ? null : diff;
 }
 
-function minsLabel(m) {
-  if (m === null) return "";
-  if (m <= 0) return "Due";
-  return `${m} min`;
-}
-
 function relativeTime(date) {
   if (!date) return "";
   const s = Math.round((Date.now() - date.getTime()) / 1000);
@@ -80,7 +92,7 @@ function getStatus(svc) {
   const dep = svc.temporalData?.departure;
   if (!dep) return { key: "on-time", label: "On time" };
   if (dep.isCancelled) return { key: "cancelled", label: "Cancelled" };
-  const lat = dep.realtimeAdvertisedLateness;
+  const lat = dep.realtimeAdvertisedLateness || dep.realtimeInternalLateness;
   if (lat && lat > 0) return { key: "delayed", label: `+${lat} min` };
   return { key: "on-time", label: "On time" };
 }
@@ -90,11 +102,15 @@ function getPlatform(svc) {
   const plat = svc.locationMetadata?.platform;
   if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "Cancelled" };
   if (!plat) return { text: "\u2014", tier: "unknown", label: "Unknown" };
+  // actual = confirmed by signalling
   if (plat.actual) {
     const changed = plat.planned && plat.actual !== plat.planned;
     if (changed) return { text: plat.actual, tier: "changed", label: "Changed" };
     return { text: plat.actual, tier: "confirmed", label: "Confirmed" };
   }
+  // forecast = expected but not yet confirmed
+  if (plat.forecast) return { text: plat.forecast, tier: "expected", label: "Expected" };
+  // planned = timetabled only
   if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected" };
   return { text: "\u2014", tier: "unknown", label: "Unknown" };
 }
@@ -107,11 +123,7 @@ function getScheduledTime(svc) { return svc.temporalData?.departure?.scheduleAdv
 function getDestination(svc) { return svc.destination?.[0]?.location?.description || "Unknown"; }
 function getOperator(svc) { return svc.scheduleMetadata?.operator?.name || ""; }
 function nowHHMM() { return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }); }
-
-// Build a key for platform change detection
-function svcKey(svc) {
-  return `${getDestination(svc)}-${getScheduledTime(svc)}`;
-}
+function svcKey(svc) { return `${getDestination(svc)}-${getScheduledTime(svc)}`; }
 
 // ── Styles ──
 function getCSS(dark) {
@@ -137,10 +149,8 @@ function getCSS(dark) {
   }
   body,#root{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .3s,color .3s}
   .app{max-width:480px;margin:0 auto;min-height:100vh;position:relative}
-
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-  /* ── Search ── */
   .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
   .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
   .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
@@ -167,7 +177,6 @@ function getCSS(dark) {
   .dropdown-name{font-size:14px;font-weight:500}
   .dropdown-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
 
-  /* ── Board ── */
   .board-screen{display:flex;flex-direction:column;min-height:100vh}
   .board-header{position:sticky;top:0;z-index:40;background:var(--header-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:12px 16px 0;border-bottom:1px solid var(--border)}
   .header-row1{display:flex;align-items:center;gap:8px}
@@ -178,7 +187,7 @@ function getCSS(dark) {
   .header-row2{display:flex;align-items:center;justify-content:space-between;padding-left:44px;margin-top:3px}
   .header-sub{font-size:11px;color:var(--text-dim)}
   .header-actions{display:flex;align-items:center;gap:6px}
-  .live-pill{display:flex;align-items:center;gap:5px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:4px 12px;border-radius:14px;cursor:pointer;font-size:11px;font-weight:700;color:var(--green);letter-spacing:.5px;text-transform:uppercase;transition:background .2s;min-height:32px}
+  .live-pill{display:flex;align-items:center;gap:5px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:4px 12px;border-radius:14px;cursor:pointer;font-size:11px;font-weight:700;color:var(--green);letter-spacing:.5px;text-transform:uppercase;min-height:32px}
   .live-pill:hover{background:rgba(16,185,129,.15)}
   .live-dot{width:6px;height:6px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
@@ -186,16 +195,13 @@ function getCSS(dark) {
   .refresh-bar{height:3px;background:var(--border);overflow:hidden}
   .refresh-fill{height:100%;background:var(--accent);transition:width 1s linear}
 
-  /* ── Toast ── */
   .toast-wrap{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:6px;max-width:460px;width:calc(100% - 32px)}
   .toast{background:var(--orange);color:#fff;padding:12px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:8px;animation:toastIn .3s ease-out}
   @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
   .toast-icon{font-size:16px;flex-shrink:0}
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
-  /* ── Cards ── */
   .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
-
   .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
@@ -238,10 +244,9 @@ function getCSS(dark) {
   .plat-status-unknown{color:var(--text-dim)}
 
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
-
   .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
-  .tip-platform{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15)}
-  .tip-platform-changed{background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2)}
+  .tip-platform{background:rgba(45,106,79,.06);border:1px solid rgba(45,106,79,.15)}
+  .tip-platform-changed{background:rgba(139,90,60,.08);border:1px solid rgba(139,90,60,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
   .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
   .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
@@ -256,10 +261,8 @@ function getCSS(dark) {
   .detail-item{display:flex;flex-direction:column;gap:1px}
   .detail-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
   .detail-value{font-size:12px;font-weight:600;color:var(--text-muted)}
-
   .cancel-reason{font-size:12px;color:var(--red);font-weight:500;font-style:italic}
 
-  /* ── Legend ── */
   .legend-bar{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 10px;flex-wrap:wrap}
   .legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);font-weight:500}
   .legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
@@ -288,9 +291,7 @@ const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="n
 const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
-const LocIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>;
 
-// ── Components ──
 function DepartureCard({ svc }) {
   const [expanded, setExpanded] = useState(false);
   const status = getStatus(svc);
@@ -301,6 +302,7 @@ function DepartureCard({ svc }) {
   const effective = getEffectiveTime(svc);
   const mins = minsUntil(effective);
   const isDelayed = status.key === "delayed";
+  const vehicles = svc.locationMetadata?.numberOfVehicles;
   const guidance = COACH_GUIDANCE[operator];
   const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
   const isCompulsory = COMPULSORY_RESERVATION.has(operator);
@@ -327,16 +329,15 @@ function DepartureCard({ svc }) {
         <div className="meta-row">
           <span className={`status-badge status-${status.key}`}>{status.label}</span>
           {status.key !== "cancelled" && guidance && (
-            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}
-              title={guidance.tip}>{"\uD83D\uDCBA"} {guidance.cardLabel}</span>
+            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{"\uD83D\uDCBA"} {guidance.cardLabel}</span>
           )}
           {status.key !== "cancelled" && isNoReservation && (
-            <span className="coach-pill coach-pill-free" title="This operator doesn't use reservations">{"\u2705"} Sit anywhere</span>
+            <span className="coach-pill coach-pill-free">{"\u2705"} Sit anywhere</span>
           )}
           {status.key !== "cancelled" && isLumo && (
-            <span className="coach-pill coach-pill-hint" title={LUMO_GUIDANCE.tip}>{"\uD83D\uDCBA"} {LUMO_GUIDANCE.cardLabel}</span>
+            <span className="coach-pill coach-pill-hint">{"\uD83D\uDCBA"} {LUMO_GUIDANCE.cardLabel}</span>
           )}
-          <span className="operator-name">{operator}</span>
+          <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
         </div>
       </div>
 
@@ -380,16 +381,11 @@ function DepartureCard({ svc }) {
             </div>
           )}
 
-          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && (
             <div className={`tip-card ${guidance.confidence === "high" ? "tip-coach" : "tip-hint"}`}>
               <span className="tip-icon">{guidance.confidence === "high" ? "\uD83D\uDCBA" : "\uD83D\uDCA1"}</span>
               <div className="tip-content">
-                <span className="tip-title">
-                  {guidance.confidence === "high"
-                    ? `Unreserved: Coach ${guidance.coaches}`
-                    : `Seating hint: Coach ${guidance.coaches}`}
-                </span>
+                <span className="tip-title">{guidance.confidence === "high" ? `Unreserved: Coach ${guidance.coaches}` : `Seating hint: Coach ${guidance.coaches}`}</span>
                 <span className="tip-desc">{guidance.tip}</span>
               </div>
             </div>
@@ -439,6 +435,12 @@ function DepartureCard({ svc }) {
                 <span className="detail-value" style={{color:"var(--amber)"}}>{fmtTime(effective)}</span>
               </div>
             )}
+            {vehicles && (
+              <div className="detail-item">
+                <span className="detail-label">Coaches</span>
+                <span className="detail-value">{vehicles}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -457,7 +459,6 @@ function CompactLegend() {
   );
 }
 
-// ── App ──
 export default function App() {
   const [dark, setDark] = useState(() => {
     try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
@@ -485,7 +486,6 @@ export default function App() {
 
   useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); }, []);
 
-  // Clock + relative update time
   useEffect(() => {
     clockRef.current = setInterval(() => {
       setClock(nowHHMM());
@@ -501,7 +501,6 @@ export default function App() {
     setShowDrop(true);
   }, [query, stations]);
 
-  // Platform change detection
   const detectChanges = useCallback((newServices) => {
     if (!prevDepsRef.current) { prevDepsRef.current = newServices; return; }
     const oldMap = {};
@@ -515,7 +514,6 @@ export default function App() {
         newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: newP.tier });
         try { navigator.vibrate?.(200); } catch {}
       }
-      // Also alert when expected → confirmed
       if (oldP && oldP.tier === "expected" && newP.tier === "confirmed" && oldP.text === newP.text) {
         newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: "now-confirmed" });
         try { navigator.vibrate?.(100); } catch {}
@@ -564,7 +562,6 @@ export default function App() {
 
   const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
 
-  // Auto-dismiss toasts
   useEffect(() => {
     if (!toasts.length) return;
     const timer = setTimeout(() => setToasts(t => t.slice(1)), 8000);
@@ -575,7 +572,6 @@ export default function App() {
     <>
       <style>{getCSS(dark)}</style>
       <div className="app">
-        {/* ── Toasts ── */}
         {toasts.length > 0 && (
           <div className="toast-wrap" role="alert" aria-live="assertive">
             {toasts.map(t => (
