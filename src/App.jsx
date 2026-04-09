@@ -604,9 +604,9 @@ function DonationWidget({ dark }) {
 
             {step === "success" && (
               <div className="donate-success">
-                <div className="donate-success-icon">🍺</div>
-                <div className="donate-success-title">Cheers! Much appreciated.</div>
-                <div className="donate-success-sub">Keeps the tools running. Thanks for the support.</div>
+                <div className="donate-success-icon">🙏</div>
+                <div className="donate-success-title">You're a good 'un.</div>
+                <div className="donate-success-sub">Thank you for the support.</div>
               </div>
             )}
 
