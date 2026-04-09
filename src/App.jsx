@@ -31,7 +31,7 @@ const COACH_GUIDANCE = {
   "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
   "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
   "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Mar 2026" },
-  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats \u2014 look for green lights above seats.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
+  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats — look for green lights above seats.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
 };
 
 function getCrossCountryGuidance(numVehicles) {
@@ -62,16 +62,16 @@ function getGuidance(operator, numVehicles) {
   return COACH_GUIDANCE[operator] || null;
 }
 
-// ── Recent Stations ──
+// ── Recent Routes ──
 function getRecent() {
-  try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
+  try { const r = JSON.parse(localStorage.getItem("platform_recent_v2")); return Array.isArray(r) ? r.slice(0, 3) : []; }
   catch { return []; }
 }
-function saveRecent(station) {
+function saveRecent(from, to) {
   try {
-    let r = getRecent().filter(s => s.code !== station.code);
-    r.unshift(station);
-    localStorage.setItem("platform_recent", JSON.stringify(r.slice(0, 3)));
+    let r = getRecent().filter(rt => !(rt.from.code === from.code && (rt.to?.code || "") === (to?.code || "")));
+    r.unshift({ from, to: to || null });
+    localStorage.setItem("platform_recent_v2", JSON.stringify(r.slice(0, 3)));
   } catch {}
 }
 
@@ -89,8 +89,10 @@ async function fetchStations() {
   return data;
 }
 
-async function fetchDepartures(code) {
-  const r = await fetch(`${API_BASE}/departures?code=${code}`);
+async function fetchDepartures(code, toCode) {
+  let url = `${API_BASE}/departures?code=${code}`;
+  if (toCode) url += `&to=${toCode}`;
+  const r = await fetch(url);
   if (!r.ok) throw new Error("Failed to fetch departures");
   const data = await r.json();
   const all = data.services || [];
@@ -201,46 +203,42 @@ function getPlatformMessage(userService, allServices) {
   const hasActualDep = !!dep?.realtimeActual;
   if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "\uD83D\uDE86", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
 
-  // Confirmed by signalling — departure status only (not arrival, avoids terminus false positives)
   const confirmed = departureStatus === "ARRIVING" || departureStatus === "AT_PLATFORM" || departureStatus === "DEPART_PREPARING" || departureStatus === "DEPART_READY";
 
   if (confirmed) {
     return {
-      title: isChanged ? `Platform changed to ${platNum} \u2014 board now` : `Your train is at Platform ${platNum}`,
-      description: isChanged ? "Confirmed via live data. This is your train \u2014 board now." : "This is your train \u2014 board now.",
+      title: isChanged ? `Platform changed to ${platNum} — board now` : `Your train is at Platform ${platNum}`,
+      description: isChanged ? "Confirmed via live data. This is your train — board now." : "This is your train — board now.",
       icon: isChanged ? "\u26A0\uFE0F" : "\u2705",
       cardLabel: isChanged ? "Changed" : "Board now",
       tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
   }
 
-  // Likely here — within 3 minutes but no signalling confirmation yet
   const effective = dep?.realtimeForecast || dep?.scheduleAdvertised;
   const minsOut = effective ? Math.round((new Date(effective) - new Date()) / 60000) : null;
   const likelyHere = minsOut !== null && minsOut <= 3;
 
   if (likelyHere) {
     return {
-      title: isChanged ? `Platform changed to ${platNum} \u2014 check train` : `Platform ${platNum} \u2014 check train`,
+      title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — check train`,
       description: "Your train is likely here. Check the destination on the train before boarding.",
       icon: isChanged ? "\u26A0\uFE0F" : "\uD83D\uDFE1",
       cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
   }
 
-  // Platform occupied by a different service
   const { occupied } = checkPlatformOccupancy(userService, allServices);
   if (occupied) {
     return {
-      title: isChanged ? `Platform changed to ${platNum} \u2014 check train` : `Platform ${platNum} \u2014 another train there now`,
+      title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — another train there now`,
       description: "A different service is at this platform. Check the destination on the train before boarding.",
       icon: "\uD83D\uDFE1", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
   }
 
-  // Default: confirmed platform, clear, train not imminent
   return {
-    title: isChanged ? `Platform changed to ${platNum} \u2014 head there now` : `Platform ${platNum} confirmed \u2014 head there now`,
+    title: isChanged ? `Platform changed to ${platNum} — head there now` : `Platform ${platNum} confirmed — head there now`,
     description: "Get there early and be first to board.",
     icon: isChanged ? "\u26A0\uFE0F" : "\u2705",
     cardLabel: isChanged ? "Changed" : "Confirmed",
@@ -277,35 +275,51 @@ function getCSS(dark) {
   .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
   .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
   .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
-  .search-wrap{width:100%;position:relative}
+
+  .search-fields{width:100%;display:flex;flex-direction:column;gap:8px}
+  .field-wrap{position:relative;width:100%}
+  .field-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
-  .search-input{width:100%;padding:16px 16px 16px 48px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:14px;color:var(--text);font-size:16px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
+  .search-input{width:100%;padding:14px 14px 14px 44px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:12px;color:var(--text);font-size:15px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
   .search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
   .search-input::placeholder{color:var(--text-dim)}
+  .search-input-sm{padding:12px 14px 12px 40px;font-size:14px}
+  .dest-optional{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--text-dim);pointer-events:none}
+  .clear-dest{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--text-muted);cursor:pointer;font-family:inherit}
+
+  .go-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:4px;transition:opacity .2s}
+  .go-btn:hover{opacity:.9}
+  .go-btn:disabled{opacity:.4;cursor:default}
+
   .theme-toggle{position:absolute;top:20px;right:20px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;transition:border-color .2s}
   .theme-toggle:hover{border-color:var(--accent)}
 
-  .recent-section{width:100%;margin-top:20px}
+  .recent-section{width:100%;margin-top:16px}
   .recent-label{font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
   .recent-list{display:flex;flex-direction:column;gap:6px}
-  .recent-btn{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:background .15s;min-height:48px}
+  .recent-btn{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:background .15s;min-height:48px}
   .recent-btn:hover{background:var(--bg-card-hover)}
-  .recent-name{font-size:14px;font-weight:600;color:var(--text)}
-  .recent-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
+  .recent-route{display:flex;flex-direction:column;gap:2px}
+  .recent-from{font-size:14px;font-weight:600;color:var(--text)}
+  .recent-to{font-size:12px;color:var(--text-muted)}
+  .recent-codes{display:flex;gap:4px}
+  .recent-code{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:4px}
 
-  .dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:320px;overflow-y:auto;box-shadow:0 12px 40px var(--shadow)}
-  .dropdown-item{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border);min-height:48px}
+  .dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:50;max-height:240px;overflow-y:auto;box-shadow:0 12px 40px var(--shadow)}
+  .dropdown-item{padding:13px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border-bottom:1px solid var(--border);min-height:44px}
   .dropdown-item:last-child{border-bottom:none}
   .dropdown-item:hover{background:var(--accent-dim)}
-  .dropdown-name{font-size:14px;font-weight:500}
-  .dropdown-code{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:3px 8px;border-radius:6px}
+  .dropdown-name{font-size:13px;font-weight:500}
+  .dropdown-code{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:5px}
 
   .board-screen{display:flex;flex-direction:column;min-height:100vh}
   .board-header{position:sticky;top:0;z-index:40;background:var(--header-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:12px 16px 0;border-bottom:1px solid var(--border)}
   .header-row1{display:flex;align-items:center;gap:8px}
   .back-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:12px;border-radius:10px;display:flex;align-items:center;min-width:44px;min-height:44px;justify-content:center;transition:all .2s}
   .back-btn:hover{color:var(--text);background:var(--accent-dim)}
-  .station-name{font-size:17px;font-weight:800;letter-spacing:-.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .header-title{flex:1;min-width:0}
+  .station-name{font-size:17px;font-weight:800;letter-spacing:-.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .route-to{font-size:12px;color:var(--text-dim);font-weight:500}
   .header-clock{font-size:17px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
   .header-row2{display:flex;align-items:center;justify-content:space-between;padding-left:44px;margin-top:3px}
   .header-sub{font-size:11px;color:var(--text-dim)}
@@ -333,9 +347,8 @@ function getCSS(dark) {
 
   .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
   .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
-  .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
-  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
-  .countdown-time{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;margin-top:2px}
+  .countdown-due{font-size:14px;font-weight:700;color:var(--green)}
+  .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:2px}
 
   .info-col{display:flex;flex-direction:column;gap:3px;min-width:0}
   .dest-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
@@ -421,7 +434,8 @@ function getCSS(dark) {
 }
 
 // ── Icons ──
-const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const SearchIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const ArrowIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>;
 const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
@@ -487,7 +501,6 @@ function DepartureCard({ svc, allServices, stationCode }) {
 
       {expanded && (
         <div className="expanded-area">
-          {/* Platform guidance — data-driven */}
           {platMsg.tier !== "unknown" && (
             <div className={`tip-card ${platMsg.tipClass}`}>
               <span className="tip-icon">{platMsg.icon}</span>
@@ -498,7 +511,6 @@ function DepartureCard({ svc, allServices, stationCode }) {
             </div>
           )}
 
-          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
             <div className="tip-card tip-coach">
               <span className="tip-icon">{"\uD83D\uDCBA"}</span>
@@ -545,7 +557,6 @@ function DepartureCard({ svc, allServices, stationCode }) {
             </div>
           )}
 
-          {/* Feedback */}
           <div className={`feedback-btn ${feedbackSent ? "feedback-btn-done" : ""}`} role="button" tabIndex={0}
             onClick={e => {
               e.stopPropagation();
@@ -553,10 +564,8 @@ function DepartureCard({ svc, allServices, stationCode }) {
               setFeedbackSent(true);
               trackEvent("feedback", {
                 station_code: stationCode || "",
-                destination: dest,
-                operator,
-                platform: plat.text,
-                platform_tier: plat.tier,
+                destination: dest, operator,
+                platform: plat.text, platform_tier: plat.tier,
                 seating_guidance: guidance?.cardLabel || (isNoReservation ? "No reservations" : ""),
               });
             }}>
@@ -612,10 +621,18 @@ export default function App() {
   });
   const [screen, setScreen] = useState("search");
   const [stations, setStations] = useState([]);
-  const [query, setQuery] = useState("");
-  const [filtered, setFiltered] = useState([]);
-  const [showDrop, setShowDrop] = useState(false);
-  const [station, setStation] = useState(null);
+
+  // Search fields
+  const [fromQuery, setFromQuery] = useState("");
+  const [fromStation, setFromStation] = useState(null);
+  const [fromFiltered, setFromFiltered] = useState([]);
+  const [showFromDrop, setShowFromDrop] = useState(false);
+
+  const [toQuery, setToQuery] = useState("");
+  const [toStation, setToStation] = useState(null);
+  const [toFiltered, setToFiltered] = useState([]);
+  const [showToDrop, setShowToDrop] = useState(false);
+
   const [deps, setDeps] = useState(null);
   const [allSvcs, setAllSvcs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -630,7 +647,7 @@ export default function App() {
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const pctRef = useRef(null);
-  const inputRef = useRef(null);
+  const fromRef = useRef(null);
 
   useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); trackEvent("page_view"); }, []);
 
@@ -642,12 +659,21 @@ export default function App() {
     return () => clearInterval(clockRef.current);
   }, [lastUpDate]);
 
+  // From station filter
   useEffect(() => {
-    if (!query.trim()) { setFiltered([]); setShowDrop(false); return; }
-    const q = query.toLowerCase();
-    setFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 8));
-    setShowDrop(true);
-  }, [query, stations]);
+    if (!fromQuery.trim()) { setFromFiltered([]); setShowFromDrop(false); return; }
+    const q = fromQuery.toLowerCase();
+    setFromFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 6));
+    setShowFromDrop(true);
+  }, [fromQuery, stations]);
+
+  // To station filter
+  useEffect(() => {
+    if (!toQuery.trim()) { setToFiltered([]); setShowToDrop(false); return; }
+    const q = toQuery.toLowerCase();
+    setToFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).filter(s => s.code !== fromStation?.code).slice(0, 6));
+    setShowToDrop(true);
+  }, [toQuery, stations, fromStation]);
 
   const detectChanges = useCallback((newServices) => {
     if (!prevDepsRef.current) { prevDepsRef.current = newServices; return; }
@@ -671,10 +697,10 @@ export default function App() {
     prevDepsRef.current = newServices;
   }, []);
 
-  const loadDepartures = useCallback(async (code) => {
+  const loadDepartures = useCallback(async (code, toCode) => {
     setLoading(true); setError(null);
     try {
-      const data = await fetchDepartures(code);
+      const data = await fetchDepartures(code, toCode);
       const svcs = data.departures;
       setAllSvcs(data.allServices);
       detectChanges(svcs);
@@ -687,27 +713,50 @@ export default function App() {
     finally { setLoading(false); }
   }, [detectChanges]);
 
-  const selectStation = useCallback((s) => {
-    setStation(s); setQuery(""); setShowDrop(false);
-    saveRecent(s); setRecent(getRecent());
+  const go = useCallback(() => {
+    if (!fromStation) return;
+    saveRecent(fromStation, toStation);
+    setRecent(getRecent());
     prevDepsRef.current = null;
-    trackEvent("station_search", { station_code: s.code, station_name: s.name });
-    setScreen("board"); loadDepartures(s.code);
-  }, [loadDepartures]);
+    trackEvent("station_search", { station_code: fromStation.code, station_name: fromStation.name, destination_code: toStation?.code || "", destination_name: toStation?.name || "" });
+    setScreen("board");
+    loadDepartures(fromStation.code, toStation?.code);
+  }, [fromStation, toStation, loadDepartures]);
+
+  const selectFrom = (s) => {
+    setFromStation(s); setFromQuery(s.name); setShowFromDrop(false);
+  };
+
+  const selectTo = (s) => {
+    setToStation(s); setToQuery(s.name); setShowToDrop(false);
+  };
+
+  const selectRecent = (rt) => {
+    setFromStation(rt.from); setFromQuery(rt.from.name);
+    if (rt.to) { setToStation(rt.to); setToQuery(rt.to.name); }
+    else { setToStation(null); setToQuery(""); }
+    // Go immediately
+    saveRecent(rt.from, rt.to);
+    setRecent(getRecent());
+    prevDepsRef.current = null;
+    trackEvent("station_search", { station_code: rt.from.code, station_name: rt.from.name, destination_code: rt.to?.code || "", destination_name: rt.to?.name || "" });
+    setScreen("board");
+    loadDepartures(rt.from.code, rt.to?.code);
+  };
 
   useEffect(() => {
-    if (screen !== "board" || !station) return;
+    if (screen !== "board" || !fromStation) return;
     let elapsed = 0;
     pctRef.current = setInterval(() => { elapsed += 1000; setRefreshPct(Math.min((elapsed / REFRESH_INTERVAL) * 100, 100)); }, 1000);
-    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(station.code); }, REFRESH_INTERVAL);
+    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(fromStation.code, toStation?.code); }, REFRESH_INTERVAL);
     return () => { clearInterval(timerRef.current); clearInterval(pctRef.current); };
-  }, [screen, station, loadDepartures]);
+  }, [screen, fromStation, toStation, loadDepartures]);
 
   const goBack = () => {
     setScreen("search"); setDeps(null); setAllSvcs([]); setError(null); setToasts([]);
     clearInterval(timerRef.current); clearInterval(pctRef.current);
     prevDepsRef.current = null;
-    setTimeout(() => inputRef.current?.focus(), 100);
+    setTimeout(() => fromRef.current?.focus(), 100);
   };
 
   const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
@@ -744,34 +793,68 @@ export default function App() {
             </button>
             <div className="logo">Platform</div>
             <div className="tagline">Live platforms and seat guidance</div>
-            <div className="search-wrap" role="combobox" aria-expanded={showDrop} aria-haspopup="listbox">
-              <div className="search-icon"><SearchIcon/></div>
-              <input ref={inputRef} className="search-input" placeholder="Where are you departing from?"
-                value={query} onChange={e => setQuery(e.target.value)}
-                onFocus={() => { if (filtered.length) setShowDrop(true); }}
-                onBlur={() => setTimeout(() => setShowDrop(false), 200)}
-                autoComplete="off" aria-label="Search stations" role="searchbox"/>
-              {showDrop && filtered.length > 0 && (
-                <div className="dropdown" role="listbox">
-                  {filtered.map(s => (
-                    <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectStation(s)}>
-                      <span className="dropdown-name">{s.name}</span>
-                      <span className="dropdown-code">{s.code}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+
+            <div className="search-fields">
+              <div className="field-wrap">
+                <div className="search-icon"><SearchIcon/></div>
+                <input ref={fromRef} className="search-input" placeholder="Departing from?"
+                  value={fromQuery} onChange={e => { setFromQuery(e.target.value); setFromStation(null); }}
+                  onFocus={() => { if (fromFiltered.length) setShowFromDrop(true); }}
+                  onBlur={() => setTimeout(() => setShowFromDrop(false), 200)}
+                  autoComplete="off" aria-label="Departure station"/>
+                {showFromDrop && fromFiltered.length > 0 && (
+                  <div className="dropdown" role="listbox">
+                    {fromFiltered.map(s => (
+                      <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectFrom(s)}>
+                        <span className="dropdown-name">{s.name}</span>
+                        <span className="dropdown-code">{s.code}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="field-wrap">
+                <div className="search-icon"><ArrowIcon/></div>
+                <input className="search-input search-input-sm" placeholder="Going to? (optional)"
+                  value={toQuery} onChange={e => { setToQuery(e.target.value); setToStation(null); }}
+                  onFocus={() => { if (toFiltered.length) setShowToDrop(true); }}
+                  onBlur={() => setTimeout(() => setShowToDrop(false), 200)}
+                  autoComplete="off" aria-label="Destination station (optional)"/>
+                {!toQuery && <span className="dest-optional">optional</span>}
+                {toStation && <button className="clear-dest" onMouseDown={e => { e.preventDefault(); setToStation(null); setToQuery(""); }}>Clear</button>}
+                {showToDrop && toFiltered.length > 0 && (
+                  <div className="dropdown" role="listbox">
+                    {toFiltered.map(s => (
+                      <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectTo(s)}>
+                        <span className="dropdown-name">{s.name}</span>
+                        <span className="dropdown-code">{s.code}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button className="go-btn" disabled={!fromStation} onClick={go}>
+                {fromStation ? (toStation ? `Show trains to ${toStation.name}` : `Show departures from ${fromStation.name}`) : "Select a station"}
+              </button>
             </div>
 
-            {recent.length > 0 && !query && (
+            {recent.length > 0 && !fromQuery && !toQuery && (
               <div className="recent-section">
-                <div className="recent-label">Recent stations</div>
+                <div className="recent-label">Recent</div>
                 <div className="recent-list">
-                  {recent.map(s => (
-                    <div key={s.code} className="recent-btn" role="button" tabIndex={0}
-                      onClick={() => selectStation(s)} onKeyDown={e => e.key === "Enter" && selectStation(s)}>
-                      <span className="recent-name">{s.name}</span>
-                      <span className="recent-code">{s.code}</span>
+                  {recent.map((rt, i) => (
+                    <div key={i} className="recent-btn" role="button" tabIndex={0}
+                      onClick={() => selectRecent(rt)} onKeyDown={e => e.key === "Enter" && selectRecent(rt)}>
+                      <div className="recent-route">
+                        <span className="recent-from">{rt.from.name}</span>
+                        {rt.to && <span className="recent-to">to {rt.to.name}</span>}
+                      </div>
+                      <div className="recent-codes">
+                        <span className="recent-code">{rt.from.code}</span>
+                        {rt.to && <span className="recent-code">{rt.to.code}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -790,13 +873,16 @@ export default function App() {
             <div className="board-header">
               <div className="header-row1">
                 <button className="back-btn" onClick={goBack} aria-label="Back to search"><BackIcon/></button>
-                <span className="station-name">{station?.name}</span>
+                <div className="header-title">
+                  <span className="station-name">{fromStation?.name}</span>
+                  {toStation && <span className="route-to">to {toStation.name}</span>}
+                </div>
                 <span className="header-clock">{clock}</span>
               </div>
               <div className="header-row2">
                 <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
                 <div className="header-actions">
-                  <button className="live-pill" onClick={() => station && loadDepartures(station.code)} aria-label="Refresh departures">
+                  <button className="live-pill" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)} aria-label="Refresh departures">
                     <span className="live-dot"/>LIVE
                   </button>
                   <button className="theme-btn-sm" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
@@ -811,16 +897,16 @@ export default function App() {
               <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures{"\u2026"}</span></div>
             )}
             {error && (
-              <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => station && loadDepartures(station.code)}>Retry</button></div>
+              <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)}>Retry</button></div>
             )}
             {!loading && !error && deps && deps.length === 0 && (
-              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">No departures in the next hour</div></div>
+              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">{toStation ? `No trains to ${toStation.name} in the next hour` : "No departures in the next hour"}</div></div>
             )}
             {deps && deps.length > 0 && (
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={station?.code}/>)}
+                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={fromStation?.code}/>)}
                 </div>
               </>
             )}
