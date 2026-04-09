@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
+const FEEDBACK_DELAY_MS = 8 * 60 * 1000; // 8 min after effective departure
 
 // ── Analytics ──
 function getVisitorId() {
@@ -24,20 +25,20 @@ function trackEvent(type, data) {
 
 // ── Seating Guidance ──
 const COACH_GUIDANCE = {
-  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
-  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: A" },
-  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", cardLabel: "\uD83D\uDCA1 Coach C may be free", verified: "Mar 2026" },
-  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", cardLabel: "\uD83D\uDCA1 Coach G may be free", verified: "Mar 2026" },
-  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
-  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Mar 2026" },
-  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Mar 2026" },
-  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats — look for green lights above seats.", cardLabel: "\uD83D\uDCA1 Limited unreserved", verified: "Mar 2026" },
+  "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "🪑 Unreserved: C" },
+  "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", cardLabel: "🪑 Unreserved: A" },
+  "Avanti West Coast": { confidence: "hint", coaches: "C", short: "Coach C may have unreserved seats.", cardLabel: "💡 Coach C may be free", verified: "Mar 2026" },
+  "Great Western Railway": { confidence: "hint", coaches: "G", short: "Coach G may have unreserved seats on London services.", cardLabel: "💡 Coach G may be free", verified: "Mar 2026" },
+  "East Midlands Railway": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on London services.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
+  "TransPennine Express": { confidence: "hint", coaches: "D", short: "Coach D may have unreserved seats on Nova trains.", cardLabel: "💡 Coach D may be free", verified: "Mar 2026" },
+  "Grand Central": { confidence: "hint", coaches: "B", short: "Part of Coach B may be unreserved.", cardLabel: "💡 Coach B may be free", verified: "Mar 2026" },
+  "Lumo": { confidence: "hint", coaches: null, short: "Very limited unreserved seats — look for green lights above seats.", cardLabel: "💡 Limited unreserved", verified: "Mar 2026" },
 };
 
 function getCrossCountryGuidance(numVehicles) {
-  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", cardLabel: "\uD83D\uDCA1 Coaches B, H, L may be free", verified: "Apr 2026" };
-  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", cardLabel: "\uD83D\uDCA1 Coach B may be free", verified: "Apr 2026" };
-  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", cardLabel: "\uD83D\uDCA1 Coach D may be free", verified: "Apr 2026" };
+  if (numVehicles >= 9) return { confidence: "hint", coaches: "B, H & L", short: "Head to Coaches B, H or L for unreserved seats.", cardLabel: "💡 Coaches B, H, L may be free", verified: "Apr 2026" };
+  if (numVehicles >= 5) return { confidence: "hint", coaches: "B", short: "Coach B may have unreserved seats.", cardLabel: "💡 Coach B may be free", verified: "Apr 2026" };
+  return { confidence: "hint", coaches: "D", short: "Some seats in Coach D may be unreserved.", cardLabel: "💡 Coach D may be free", verified: "Apr 2026" };
 }
 
 const NO_RESERVATION_OPERATORS = new Set([
@@ -133,7 +134,7 @@ function getPlatform(svc) {
   const dep = svc.temporalData?.departure;
   const plat = svc.locationMetadata?.platform;
   if (dep?.isCancelled) return { text: "N/A", tier: "cancelled", label: "Cancelled" };
-  if (!plat) return { text: "\u2014", tier: "unknown", label: "Unknown" };
+  if (!plat) return { text: "—", tier: "unknown", label: "Unknown" };
   if (plat.actual) {
     const changed = plat.planned && plat.actual !== plat.planned;
     if (changed) return { text: plat.actual, tier: "changed", label: "Changed" };
@@ -141,7 +142,7 @@ function getPlatform(svc) {
   }
   if (plat.forecast) return { text: plat.forecast, tier: "expected", label: "Expected" };
   if (plat.planned) return { text: plat.planned, tier: "expected", label: "Expected" };
-  return { text: "\u2014", tier: "unknown", label: "Unknown" };
+  return { text: "—", tier: "unknown", label: "Unknown" };
 }
 
 function getEffectiveTime(svc) {
@@ -189,19 +190,19 @@ function getPlatformMessage(userService, allServices) {
   const dep = userService.temporalData?.departure;
   const plat = userService.locationMetadata?.platform;
 
-  if (dep?.isCancelled) return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "\u274C", cardLabel: "Cancelled", tier: "cancelled", tipClass: "tip-hint" };
+  if (dep?.isCancelled) return { title: "This service is cancelled", description: "Check the next service to your destination.", icon: "❌", cardLabel: "Cancelled", tier: "cancelled", tipClass: "tip-hint" };
 
-  if (!plat || (!plat.actual && !plat.forecast && !plat.planned)) return { title: "No platform yet", description: "We'll show it here as soon as it's available.", icon: "\u23F3", cardLabel: "Unknown", tier: "unknown", tipClass: "tip-hint" };
+  if (!plat || (!plat.actual && !plat.forecast && !plat.planned)) return { title: "No platform yet", description: "We'll show it here as soon as it's available.", icon: "⏳", cardLabel: "Unknown", tier: "unknown", tipClass: "tip-hint" };
 
   const platNum = plat.actual || plat.forecast || plat.planned;
   const platTier = plat.actual ? (plat.planned && plat.actual !== plat.planned ? "changed" : "confirmed") : "expected";
   const isChanged = platTier === "changed";
 
-  if (platTier === "expected") return { title: `Platform ${platNum} expected`, description: "We'll update this once the platform is confirmed.", icon: "\uD83D\uDFE1", cardLabel: "Expected", tier: "expected", tipClass: "tip-platform" };
+  if (platTier === "expected") return { title: `Platform ${platNum} expected`, description: "We'll update this once the platform is confirmed.", icon: "🟡", cardLabel: "Expected", tier: "expected", tipClass: "tip-platform" };
 
   const departureStatus = dep?.status || null;
   const hasActualDep = !!dep?.realtimeActual;
-  if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "\uD83D\uDE86", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
+  if (departureStatus === "DEPARTING" || hasActualDep) return { title: "This train has departed", description: "Check the next service to your destination.", icon: "🚆", cardLabel: "Departed", tier: "departed", tipClass: "tip-hint" };
 
   const confirmed = departureStatus === "ARRIVING" || departureStatus === "AT_PLATFORM" || departureStatus === "DEPART_PREPARING" || departureStatus === "DEPART_READY";
 
@@ -209,7 +210,7 @@ function getPlatformMessage(userService, allServices) {
     return {
       title: isChanged ? `Platform changed to ${platNum} — board now` : `Your train is at Platform ${platNum}`,
       description: isChanged ? "Confirmed via live data. This is your train — board now." : "This is your train — board now.",
-      icon: isChanged ? "\u26A0\uFE0F" : "\u2705",
+      icon: isChanged ? "⚠️" : "✅",
       cardLabel: isChanged ? "Changed" : "Board now",
       tier: "board", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
@@ -223,7 +224,7 @@ function getPlatformMessage(userService, allServices) {
     return {
       title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — check train`,
       description: "Your train is likely here. Check the destination on the train before boarding.",
-      icon: isChanged ? "\u26A0\uFE0F" : "\uD83D\uDFE1",
+      icon: isChanged ? "⚠️" : "🟡",
       cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
   }
@@ -233,14 +234,14 @@ function getPlatformMessage(userService, allServices) {
     return {
       title: isChanged ? `Platform changed to ${platNum} — check train` : `Platform ${platNum} — another train there now`,
       description: "A different service is at this platform. Check the destination on the train before boarding.",
-      icon: "\uD83D\uDFE1", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
+      icon: "🟡", cardLabel: "Check train", tier: "go-caution", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
     };
   }
 
   return {
     title: isChanged ? `Platform changed to ${platNum} — head there now` : `Platform ${platNum} confirmed — head there now`,
     description: "Get there early and be first to board.",
-    icon: isChanged ? "\u26A0\uFE0F" : "\u2705",
+    icon: isChanged ? "⚠️" : "✅",
     cardLabel: isChanged ? "Changed" : "Confirmed",
     tier: "go", tipClass: isChanged ? "tip-platform-changed" : "tip-platform"
   };
@@ -339,11 +340,54 @@ function getCSS(dark) {
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
 
   .card-list{padding:6px 10px 24px;display:flex;flex-direction:column;gap:6px}
-  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
+  .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s,box-shadow .2s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
+
+  /* ── Tracked card ── */
+  .dep-card.tracked{border-left-color:var(--accent);background:linear-gradient(160deg,rgba(99,102,241,.06),var(--bg-card));box-shadow:0 0 0 1.5px rgba(99,102,241,.2),0 4px 16px rgba(99,102,241,.08)}
+  .dep-card.tracked:hover{background:linear-gradient(160deg,rgba(99,102,241,.09),var(--bg-card-hover))}
+  .tracked-banner{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;padding-bottom:8px;border-bottom:1px solid rgba(99,102,241,.15)}
+  .tracked-label{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:5px}
+  .tracked-label-dot{width:6px;height:6px;background:var(--accent);border-radius:50%;animation:pulse 2s infinite}
+  .untrack-btn{font-size:11px;color:var(--text-dim);background:none;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:6px;transition:color .15s,background .15s;min-height:28px}
+  .untrack-btn:hover{color:var(--text-muted);background:var(--bg-input)}
+
+  /* ── Track journey button (in expanded area) ── */
+  .track-btn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px 16px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;width:100%;transition:opacity .2s;min-height:48px}
+  .track-btn:hover{opacity:.9}
+  .track-btn-sub{font-size:11px;font-weight:500;opacity:.8;display:block;margin-top:1px}
+  .tracking-status{display:flex;align-items:center;justify-content:space-between;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:10px 14px}
+  .tracking-status-left{display:flex;flex-direction:column;gap:2px}
+  .tracking-status-title{font-size:12px;font-weight:700;color:var(--accent)}
+  .tracking-status-sub{font-size:11px;color:var(--text-dim)}
+  .tracking-remove{font-size:12px;color:var(--text-dim);background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-family:inherit;font-weight:500;min-height:36px}
+  .tracking-remove:hover{color:var(--red);border-color:var(--red)}
+
+  /* ── Post-journey feedback sheet ── */
+  .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeOverlay .25s ease-out}
+  @keyframes fadeOverlay{from{opacity:0}to{opacity:1}}
+  .sheet{width:100%;max-width:480px;background:var(--bg-card);border-radius:20px 20px 0 0;padding:12px 20px 40px;animation:slideUp .3s cubic-bezier(.32,1.2,.5,1)}
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .sheet-handle{width:36px;height:4px;background:var(--border-light);border-radius:2px;margin:0 auto 20px}
+  .sheet-eyebrow{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+  .sheet-title{font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px;letter-spacing:-.4px;line-height:1.2}
+  .sheet-sub{font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.5}
+  .sheet-options{display:flex;flex-direction:column;gap:8px}
+  .sheet-option{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600;color:var(--text);transition:border-color .15s,background .15s;min-height:56px;text-align:left;width:100%}
+  .sheet-option:hover{border-color:var(--accent);background:var(--accent-dim)}
+  .sheet-option-emoji{font-size:22px;flex-shrink:0;width:28px;text-align:center}
+  .sheet-option-text{display:flex;flex-direction:column;gap:1px}
+  .sheet-option-label{font-size:14px;font-weight:700}
+  .sheet-option-desc{font-size:12px;font-weight:400;color:var(--text-muted)}
+  .sheet-skip{text-align:center;margin-top:14px;font-size:12px;color:var(--text-dim);cursor:pointer;background:none;border:none;font-family:inherit;width:100%;padding:8px;min-height:36px}
+  .sheet-skip:hover{color:var(--text-muted)}
+  .sheet-done{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 0}
+  .sheet-done-icon{font-size:40px}
+  .sheet-done-title{font-size:16px;font-weight:800;color:var(--text)}
+  .sheet-done-sub{font-size:13px;color:var(--text-muted);text-align:center;line-height:1.4}
 
   .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
   .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
@@ -399,11 +443,6 @@ function getCSS(dark) {
   .tip-report:hover{opacity:.7}
   .tip-peak{font-size:11px;color:var(--amber);font-weight:600;margin-top:2px}
 
-  .feedback-btn{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.15);border-radius:8px;padding:8px 12px;cursor:pointer;transition:background .15s;width:100%}
-  .feedback-btn:hover{background:rgba(16,185,129,.15)}
-  .feedback-btn-done{background:rgba(16,185,129,.15);border-color:rgba(16,185,129,.3);cursor:default}
-  .feedback-text{font-size:12px;font-weight:600;color:var(--green)}
-
   .detail-row{display:flex;gap:16px;flex-wrap:wrap}
   .detail-item{display:flex;flex-direction:column;gap:1px}
   .detail-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
@@ -440,10 +479,69 @@ const BackIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="non
 const SunIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 
-// ── Components ──
-function DepartureCard({ svc, allServices, stationCode }) {
-  const [expanded, setExpanded] = useState(false);
-  const [feedbackSent, setFeedbackSent] = useState(false);
+// ── Post-Journey Feedback Sheet ──
+function FeedbackSheet({ data, onSubmit, onDismiss }) {
+  const [done, setDone] = useState(false);
+  const [result, setResult] = useState(null);
+
+  function choose(r) {
+    setResult(r);
+    setDone(true);
+    onSubmit(r);
+  }
+
+  return (
+    <div className="sheet-overlay" onClick={onDismiss}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle"/>
+        {done ? (
+          <div className="sheet-done">
+            <div className="sheet-done-icon">{result === "accurate" ? "🎯" : result === "wrong" ? "📋" : "👋"}</div>
+            <div className="sheet-done-title">Thanks for the feedback</div>
+            <div className="sheet-done-sub">This helps us improve platform accuracy for everyone.</div>
+          </div>
+        ) : (
+          <>
+            <div className="sheet-eyebrow">Journey feedback</div>
+            <div className="sheet-title">How did it go?</div>
+            <div className="sheet-sub">
+              Your {fmtTime(data.scheduledAt)} to {data.dest} has departed.
+              Was the platform info we showed accurate?
+            </div>
+            <div className="sheet-options">
+              <button className="sheet-option" onClick={() => choose("accurate")}>
+                <span className="sheet-option-emoji">✅</span>
+                <span className="sheet-option-text">
+                  <span className="sheet-option-label">Yes — platform was right</span>
+                  <span className="sheet-option-desc">The info matched what happened at the station</span>
+                </span>
+              </button>
+              <button className="sheet-option" onClick={() => choose("wrong")}>
+                <span className="sheet-option-emoji">❌</span>
+                <span className="sheet-option-text">
+                  <span className="sheet-option-label">No — platform was wrong or changed</span>
+                  <span className="sheet-option-desc">The actual platform differed from what we showed</span>
+                </span>
+              </button>
+              <button className="sheet-option" onClick={() => choose("not_boarded")}>
+                <span className="sheet-option-emoji">👻</span>
+                <span className="sheet-option-text">
+                  <span className="sheet-option-label">I wasn't on this train</span>
+                  <span className="sheet-option-desc">Plans changed or I took a different service</span>
+                </span>
+              </button>
+            </div>
+            <button className="sheet-skip" onClick={onDismiss}>Skip for now</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Departure Card ──
+function DepartureCard({ svc, allServices, stationCode, isTracked, onTrack, onUntrack }) {
+  const [expanded, setExpanded] = useState(isTracked); // Auto-expand when first tracked
   const status = getStatus(svc);
   const plat = getPlatform(svc);
   const dest = getDestination(svc);
@@ -460,9 +558,29 @@ function DepartureCard({ svc, allServices, stationCode }) {
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
   const platMsg = getPlatformMessage(svc, allServices);
 
+  // Sync expand state when tracking changes externally
+  useEffect(() => { if (isTracked) setExpanded(true); }, [isTracked]);
+
   return (
-    <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
-      onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
+    <div
+      className={`dep-card ${status.key}${isTracked ? " tracked" : ""}`}
+      role="button" tabIndex={0} aria-expanded={expanded}
+      onClick={() => setExpanded(e => !e)}
+      onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}
+    >
+      {/* ── Tracked banner (visible even when collapsed) ── */}
+      {isTracked && (
+        <div className="tracked-banner" onClick={e => e.stopPropagation()}>
+          <span className="tracked-label">
+            <span className="tracked-label-dot"/>
+            Your train
+          </span>
+          <button className="untrack-btn" onClick={e => { e.stopPropagation(); onUntrack(); }}>
+            × Not my train
+          </button>
+        </div>
+      )}
+
       <div className="countdown-col">
         <span className="countdown-num">{fmtTime(scheduled)}</span>
         {mins !== null && mins > 0 ? (
@@ -480,19 +598,19 @@ function DepartureCard({ svc, allServices, stationCode }) {
             <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{guidance.cardLabel}</span>
           )}
           {status.key !== "cancelled" && isNoReservation && (
-            <span className="coach-pill coach-pill-free">{"\u2705"} No reservations</span>
+            <span className="coach-pill coach-pill-free">✅ No reservations</span>
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
-            <span className="coach-pill coach-pill-none">{"\u2139\uFE0F"} No seating info</span>
+            <span className="coach-pill coach-pill-none">ℹ️ No seating info</span>
           )}
-          <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
+          <span className="operator-name">{operator}{vehicles ? ` · ${vehicles} coaches` : ""}</span>
         </div>
       </div>
 
       <div className="plat-col">
         <div className={`plat-badge plat-${plat.tier}`}>
           {plat.text}
-          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">{"\u2713"}</span>}
+          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">✓</span>}
           {plat.tier === "changed" && <span className="plat-badge-icon plat-icon-changed">!</span>}
           {plat.tier === "expected" && <span className="plat-badge-icon plat-icon-expected">?</span>}
         </div>
@@ -501,6 +619,7 @@ function DepartureCard({ svc, allServices, stationCode }) {
 
       {expanded && (
         <div className="expanded-area">
+          {/* Platform tip */}
           {platMsg.tier !== "unknown" && (
             <div className={`tip-card ${platMsg.tipClass}`}>
               <span className="tip-icon">{platMsg.icon}</span>
@@ -511,9 +630,10 @@ function DepartureCard({ svc, allServices, stationCode }) {
             </div>
           )}
 
+          {/* Seating guidance */}
           {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
             <div className="tip-card tip-coach">
-              <span className="tip-icon">{"\uD83D\uDCBA"}</span>
+              <span className="tip-icon">🪑</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
               </div>
@@ -521,10 +641,10 @@ function DepartureCard({ svc, allServices, stationCode }) {
           )}
           {status.key !== "cancelled" && guidance && guidance.confidence === "hint" && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
+              <span className="tip-icon">💡</span>
               <div className="tip-content">
                 <span className="tip-title">{guidance.short}</span>
-                {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly.</span>}
+                {isPeakHour() && <span className="tip-peak">⏰ Peak time — unreserved seats fill quickly.</span>}
                 <div className="tip-meta">
                   {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
                   <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks! We'll review this."); }}>Report incorrect</button>
@@ -534,7 +654,7 @@ function DepartureCard({ svc, allServices, stationCode }) {
           )}
           {status.key !== "cancelled" && isNoReservation && (
             <div className="tip-card tip-free">
-              <span className="tip-icon">{"\u2705"}</span>
+              <span className="tip-icon">✅</span>
               <div className="tip-content">
                 <span className="tip-title">No reservations — every seat is first come, first served.</span>
               </div>
@@ -542,7 +662,7 @@ function DepartureCard({ svc, allServices, stationCode }) {
           )}
           {status.key !== "cancelled" && isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\u26A0\uFE0F"}</span>
+              <span className="tip-icon">⚠️</span>
               <div className="tip-content">
                 <span className="tip-title">Reservation required — check your booking for coach and seat.</span>
               </div>
@@ -550,28 +670,33 @@ function DepartureCard({ svc, allServices, stationCode }) {
           )}
           {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
             <div className="tip-card tip-hint">
-              <span className="tip-icon">{"\u2139\uFE0F"}</span>
+              <span className="tip-icon">ℹ️</span>
               <div className="tip-content">
-                <span className="tip-title">No seating info — look for unreserved seats when you get on the train.</span>
+                <span className="tip-title">No seating info — look for unreserved seats when you board.</span>
               </div>
             </div>
           )}
 
-          <div className={`feedback-btn ${feedbackSent ? "feedback-btn-done" : ""}`} role="button" tabIndex={0}
-            onClick={e => {
-              e.stopPropagation();
-              if (feedbackSent) return;
-              setFeedbackSent(true);
-              trackEvent("feedback", {
-                station_code: stationCode || "",
-                destination: dest, operator,
-                platform: plat.text, platform_tier: plat.tier,
-                seating_guidance: guidance?.cardLabel || (isNoReservation ? "No reservations" : ""),
-              });
-            }}>
-            <span>{feedbackSent ? "\u2705" : "\uD83D\uDC4D"}</span>
-            <span className="feedback-text">{feedbackSent ? "Thanks for the feedback!" : "This helped"}</span>
-          </div>
+          {/* ── Track / Untrack CTA ── */}
+          {status.key !== "cancelled" && (
+            isTracked ? (
+              <div className="tracking-status" onClick={e => e.stopPropagation()}>
+                <div className="tracking-status-left">
+                  <span className="tracking-status-title">📍 Tracking your journey</span>
+                  <span className="tracking-status-sub">We'll ask how it went after you depart</span>
+                </div>
+                <button className="tracking-remove" onClick={e => { e.stopPropagation(); onUntrack(); }}>Remove</button>
+              </div>
+            ) : (
+              <button className="track-btn" onClick={e => { e.stopPropagation(); onTrack(svc); }}>
+                <span>📍</span>
+                <span>
+                  This is my train
+                  <span className="track-btn-sub">We'll check in after you've boarded</span>
+                </span>
+              </button>
+            )
+          )}
 
           {cancelReason && <div className="cancel-reason">Reason: {cancelReason}</div>}
 
@@ -622,7 +747,6 @@ export default function App() {
   const [screen, setScreen] = useState("search");
   const [stations, setStations] = useState([]);
 
-  // Search fields
   const [fromQuery, setFromQuery] = useState("");
   const [fromStation, setFromStation] = useState(null);
   const [fromFiltered, setFromFiltered] = useState([]);
@@ -643,13 +767,101 @@ export default function App() {
   const [refreshPct, setRefreshPct] = useState(0);
   const [toasts, setToasts] = useState([]);
   const [recent, setRecent] = useState(getRecent);
+
+  // ── Journey tracking state ──
+  const [trackedJourney, setTrackedJourney] = useState(null); // { key, dest, operator, scheduledAt, effectiveAt, platform, stationCode }
+  const [feedbackSheet, setFeedbackSheet] = useState(null);   // same shape — shown post-departure
+  const feedbackTimerRef = useRef(null);
+
   const prevDepsRef = useRef(null);
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const pctRef = useRef(null);
   const fromRef = useRef(null);
 
-  useEffect(() => { fetchStations().then(setStations).catch(err => console.error("Stations:", err)); trackEvent("page_view"); }, []);
+  // ── Schedule the post-journey feedback prompt ──
+  const scheduleFeedback = useCallback((data) => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    const base = data.effectiveAt || data.scheduledAt;
+    const triggerAt = new Date(base).getTime() + FEEDBACK_DELAY_MS;
+    const delay = Math.max(0, triggerAt - Date.now());
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedbackSheet(data);
+      try { localStorage.removeItem("platform_tracked_v1"); } catch {}
+    }, delay);
+  }, []);
+
+  // ── On mount: restore any pending tracked journey ──
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("platform_tracked_v1");
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      const base = data.effectiveAt || data.scheduledAt;
+      const triggerAt = new Date(base).getTime() + FEEDBACK_DELAY_MS;
+      if (Date.now() >= triggerAt) {
+        // Already past — show feedback immediately
+        setFeedbackSheet(data);
+        localStorage.removeItem("platform_tracked_v1");
+      } else {
+        // Restore tracking and reschedule
+        setTrackedJourney(data);
+        scheduleFeedback(data);
+      }
+    } catch {}
+  }, [scheduleFeedback]);
+
+  // ── Cleanup feedback timer on unmount ──
+  useEffect(() => () => { if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current); }, []);
+
+  // ── Track a journey ──
+  const trackJourney = useCallback((svc) => {
+    const scheduledAt = getScheduledTime(svc);
+    const effectiveAt = getEffectiveTime(svc) || scheduledAt;
+    const dest = getDestination(svc);
+    const operator = getOperator(svc);
+    const platform = getPlatform(svc).text;
+    const key = svcKey(svc);
+    const data = { key, dest, operator, scheduledAt, effectiveAt, platform };
+    setTrackedJourney(data);
+    try { localStorage.setItem("platform_tracked_v1", JSON.stringify(data)); } catch {}
+    scheduleFeedback(data);
+    trackEvent("journey_tracked", { dest, operator, platform, station_code: "" });
+  }, [scheduleFeedback]);
+
+  // ── Untrack ──
+  const untrackJourney = useCallback(() => {
+    setTrackedJourney(null);
+    try { localStorage.removeItem("platform_tracked_v1"); } catch {}
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    trackEvent("journey_untracked", {});
+  }, []);
+
+  // ── Submit post-journey feedback ──
+  const submitFeedback = useCallback((result) => {
+    trackEvent("journey_feedback", {
+      result,
+      dest: feedbackSheet?.dest,
+      operator: feedbackSheet?.operator,
+      platform: feedbackSheet?.platform,
+    });
+    // Dismiss after a short delay so user sees the "thank you" state
+    setTimeout(() => {
+      setFeedbackSheet(null);
+      setTrackedJourney(null);
+    }, 2000);
+  }, [feedbackSheet]);
+
+  const dismissFeedback = useCallback(() => {
+    trackEvent("journey_feedback", { result: "dismissed" });
+    setFeedbackSheet(null);
+    setTrackedJourney(null);
+  }, []);
+
+  useEffect(() => {
+    fetchStations().then(setStations).catch(err => console.error("Stations:", err));
+    trackEvent("page_view");
+  }, []);
 
   useEffect(() => {
     clockRef.current = setInterval(() => {
@@ -659,7 +871,6 @@ export default function App() {
     return () => clearInterval(clockRef.current);
   }, [lastUpDate]);
 
-  // From station filter
   useEffect(() => {
     if (!fromQuery.trim()) { setFromFiltered([]); setShowFromDrop(false); return; }
     const q = fromQuery.toLowerCase();
@@ -667,7 +878,6 @@ export default function App() {
     setShowFromDrop(true);
   }, [fromQuery, stations]);
 
-  // To station filter
   useEffect(() => {
     if (!toQuery.trim()) { setToFiltered([]); setShowToDrop(false); return; }
     const q = toQuery.toLowerCase();
@@ -723,19 +933,13 @@ export default function App() {
     loadDepartures(fromStation.code, toStation?.code);
   }, [fromStation, toStation, loadDepartures]);
 
-  const selectFrom = (s) => {
-    setFromStation(s); setFromQuery(s.name); setShowFromDrop(false);
-  };
+  const selectFrom = s => { setFromStation(s); setFromQuery(s.name); setShowFromDrop(false); };
+  const selectTo = s => { setToStation(s); setToQuery(s.name); setShowToDrop(false); };
 
-  const selectTo = (s) => {
-    setToStation(s); setToQuery(s.name); setShowToDrop(false);
-  };
-
-  const selectRecent = (rt) => {
+  const selectRecent = rt => {
     setFromStation(rt.from); setFromQuery(rt.from.name);
     if (rt.to) { setToStation(rt.to); setToQuery(rt.to.name); }
     else { setToStation(null); setToQuery(""); }
-    // Go immediately
     saveRecent(rt.from, rt.to);
     setRecent(getRecent());
     prevDepsRef.current = null;
@@ -757,9 +961,11 @@ export default function App() {
     clearInterval(timerRef.current); clearInterval(pctRef.current);
     prevDepsRef.current = null;
     setTimeout(() => fromRef.current?.focus(), 100);
+    // Note: we do NOT clear trackedJourney or the feedback timer here.
+    // The feedback prompt can appear over the search screen — that's fine.
   };
 
-  const dismissToast = (id) => setToasts(t => t.filter(x => x.id !== id));
+  const dismissToast = id => setToasts(t => t.filter(x => x.id !== id));
 
   useEffect(() => {
     if (!toasts.length) return;
@@ -767,25 +973,42 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toasts]);
 
+  // ── Sort departures: tracked journey always floats to top ──
+  const sortedDeps = deps
+    ? [...deps].sort((a, b) => {
+        const aT = trackedJourney && svcKey(a) === trackedJourney.key ? -1 : 0;
+        const bT = trackedJourney && svcKey(b) === trackedJourney.key ? -1 : 0;
+        return aT - bT;
+      })
+    : [];
+
   return (
     <>
       <style>{getCSS(dark)}</style>
       <div className="app">
+
+        {/* ── Post-journey feedback sheet (global overlay) ── */}
+        {feedbackSheet && (
+          <FeedbackSheet data={feedbackSheet} onSubmit={submitFeedback} onDismiss={dismissFeedback}/>
+        )}
+
+        {/* ── Platform change toasts ── */}
         {toasts.length > 0 && (
           <div className="toast-wrap" role="alert" aria-live="assertive">
             {toasts.map(t => (
               <div className="toast" key={t.id}>
-                <span className="toast-icon">{t.tier === "now-confirmed" ? "\u2705" : "\u26A0\uFE0F"}</span>
+                <span className="toast-icon">{t.tier === "now-confirmed" ? "✅" : "⚠️"}</span>
                 {t.tier === "now-confirmed"
                   ? <span>Platform {t.plat} now <strong>confirmed</strong> for {t.dest}</span>
                   : <span>Platform changed to <strong>{t.plat}</strong> for {t.dest}</span>
                 }
-                <button className="toast-close" onClick={() => dismissToast(t.id)}>{"\u2715"}</button>
+                <button className="toast-close" onClick={() => dismissToast(t.id)}>✕</button>
               </div>
             ))}
           </div>
         )}
 
+        {/* ── Search screen ── */}
         {screen === "search" && (
           <div className="search-screen">
             <button className="theme-toggle" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
@@ -862,12 +1085,13 @@ export default function App() {
             )}
 
             <div className="donate-section" onClick={() => window.open("https://donate.stripe.com/YOUR_LINK","_blank")} role="button" tabIndex={0}>
-              <span>{"\u2764\uFE0F"}</span>
+              <span>❤️</span>
               <span className="donate-text">Enjoying Platform? <strong>Help keep it running</strong></span>
             </div>
           </div>
         )}
 
+        {/* ── Board screen ── */}
         {screen === "board" && (
           <div className="board-screen">
             <div className="board-header">
@@ -880,7 +1104,7 @@ export default function App() {
                 <span className="header-clock">{clock}</span>
               </div>
               <div className="header-row2">
-                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
+                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading…"}</span>
                 <div className="header-actions">
                   <button className="live-pill" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)} aria-label="Refresh departures">
                     <span className="live-dot"/>LIVE
@@ -894,19 +1118,29 @@ export default function App() {
             </div>
 
             {loading && !deps && (
-              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures{"\u2026"}</span></div>
+              <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures…</span></div>
             )}
             {error && (
               <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => fromStation && loadDepartures(fromStation.code, toStation?.code)}>Retry</button></div>
             )}
             {!loading && !error && deps && deps.length === 0 && (
-              <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">{toStation ? `No trains to ${toStation.name} in the next hour` : "No departures in the next hour"}</div></div>
+              <div className="empty-wrap"><div className="empty-icon">🚉</div><div className="empty-text">{toStation ? `No trains to ${toStation.name} in the next hour` : "No departures in the next hour"}</div></div>
             )}
-            {deps && deps.length > 0 && (
+            {sortedDeps.length > 0 && (
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={fromStation?.code}/>)}
+                  {sortedDeps.map((svc, i) => (
+                    <DepartureCard
+                      key={svcKey(svc) || i}
+                      svc={svc}
+                      allServices={allSvcs}
+                      stationCode={fromStation?.code}
+                      isTracked={!!trackedJourney && svcKey(svc) === trackedJourney.key}
+                      onTrack={trackJourney}
+                      onUntrack={untrackJourney}
+                    />
+                  ))}
                 </div>
               </>
             )}
