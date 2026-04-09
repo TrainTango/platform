@@ -226,18 +226,17 @@ function getCSS(dark) {
   .plat-col{display:flex;flex-direction:column;align-items:center;gap:2px;justify-self:end}
   .plat-badge{min-width:54px;height:54px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;letter-spacing:-.5px;padding:0 6px;font-variant-numeric:tabular-nums;position:relative}
   .plat-badge-icon{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;border:2px solid var(--bg)}
-  .plat-icon-confirmed{background:var(--green);color:#fff}
-  .plat-icon-changed{background:var(--orange);color:#fff}
-  .plat-icon-expected{background:var(--text-dim);color:#fff}
-  .plat-confirmed{background:linear-gradient(140deg,#f59e0b,#d97706);color:#090913;box-shadow:0 0 16px rgba(245,158,11,.3)}
-  .plat-changed{background:linear-gradient(140deg,#f97316,#ea580c);color:#fff;box-shadow:0 0 16px rgba(249,115,22,.35);animation:platPulse 2s ease-in-out infinite}
-  @keyframes platPulse{0%,100%{box-shadow:0 0 16px rgba(249,115,22,.35)}50%{box-shadow:0 0 22px rgba(249,115,22,.5)}}
-  .plat-expected{background:transparent;color:var(--amber);border:2.5px solid rgba(245,158,11,.4);font-size:20px}
+  .plat-icon-confirmed{background:#2d6a4f;color:#e8f5ec}
+  .plat-icon-changed{background:#8b5a3c;color:#fde8d8}
+  .plat-icon-expected{background:var(--border-light);color:var(--text-muted)}
+  .plat-confirmed{background:#2d6a4f;color:#e8f5ec;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .plat-changed{background:#8b5a3c;color:#fde8d8;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .plat-expected{background:transparent;color:var(--text-muted);border:2px solid var(--border-light);font-size:20px}
   .plat-unknown{background:var(--bg-input);color:var(--text-dim);border:2px dashed var(--border-light);font-size:18px}
-  .plat-cancelled{background:rgba(239,68,68,.08);color:rgba(239,68,68,.5);border:1.5px solid rgba(239,68,68,.15);font-size:12px;font-weight:700}
+  .plat-cancelled{background:var(--bg-input);color:var(--text-dim);border:1.5px solid var(--border);font-size:12px;font-weight:700;opacity:.6}
   .plat-status{font-size:11px;font-weight:700;letter-spacing:.2px;text-align:center}
-  .plat-status-confirmed{color:var(--amber)}
-  .plat-status-changed{color:var(--orange)}
+  .plat-status-confirmed{color:var(--text-muted)}
+  .plat-status-changed{color:var(--text-muted)}
   .plat-status-expected{color:var(--text-dim)}
   .plat-status-unknown{color:var(--text-dim)}
 
@@ -267,9 +266,9 @@ function getCSS(dark) {
   .legend-bar{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 10px;flex-wrap:wrap}
   .legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);font-weight:500}
   .legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
-  .legend-dot-confirmed{background:linear-gradient(140deg,#f59e0b,#d97706)}
-  .legend-dot-changed{background:linear-gradient(140deg,#f97316,#ea580c)}
-  .legend-dot-expected{border:2px solid rgba(245,158,11,.4);background:transparent}
+  .legend-dot-confirmed{background:#2d6a4f}
+  .legend-dot-changed{background:#8b5a3c}
+  .legend-dot-expected{border:2px solid var(--border-light);background:transparent}
   .legend-dot-unknown{border:2px dashed var(--border-light);background:transparent}
 
   .loading-wrap,.error-wrap,.empty-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;text-align:center}
