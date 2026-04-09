@@ -231,7 +231,9 @@ function getCSS(dark) {
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
   .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
-  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:2px}
+  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;margin-bottom:2px}
+  .logo-go{color:#6366f1}
+  .logo-platform{background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
   .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
   .search-wrap{width:100%;position:relative}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
@@ -939,7 +941,7 @@ export default function App() {
             <button className="theme-toggle" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
               {dark ? <SunIcon/> : <MoonIcon/>}
             </button>
-            <div className="logo">Platform</div>
+            <div className="logo"><span className="logo-go">Go</span><span className="logo-platform">Platform</span></div>
             <div className="tagline">Live platforms and seat guidance</div>
             <div className="search-wrap" role="combobox" aria-expanded={showDrop} aria-haspopup="listbox">
               <div className="search-icon"><SearchIcon/></div>
