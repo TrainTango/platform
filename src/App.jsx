@@ -404,7 +404,8 @@ function getCSS(dark) {
   .donate-amount-row{display:flex;gap:8px;margin-bottom:10px;align-items:stretch}
   .donate-amount-input-wrap{flex:1;display:flex;align-items:center;background:var(--bg-input);border:1.5px solid #5F7FFF;border-radius:10px;padding:0 12px}
   .donate-currency{font-size:16px;font-weight:700;color:var(--text);margin-right:10px}
-  .donate-amount-input{flex:1;background:none;border:none;outline:none;font-size:14px;font-family:inherit;color:var(--text);padding:12px 0;width:0}
+  .donate-amount-input::-webkit-outer-spin-button,.donate-amount-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .donate-amount-input{flex:1;background:none;border:none;outline:none;font-size:14px;font-family:inherit;color:var(--text);padding:12px 0;width:0;-moz-appearance:textfield}
   .donate-amount-input::placeholder{color:var(--text-dim)}
   .donate-quick{padding:0 14px;background:var(--bg-input);border:1.5px solid var(--border);border-radius:10px;font-size:14px;font-weight:700;color:var(--text-muted);cursor:pointer;font-family:inherit;transition:all .15s;white-space:nowrap}
   .donate-quick:hover,.donate-quick.active{border-color:#5F7FFF;color:#5F7FFF;background:rgba(95,127,255,.08)}
