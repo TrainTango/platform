@@ -6,7 +6,7 @@ async function supabaseInsert(table, data) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': SUPABASE_KEY,
+      'apikey': SUPABASE_KEY
       'Authorization': `Bearer ${SUPABASE_KEY}`,
       'Prefer': 'return=minimal',
     },
