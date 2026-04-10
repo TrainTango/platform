@@ -49,4 +49,15 @@ export default async function handler(req, res) {
       await supabaseInsert('product_feedback', { visitor_id, rating: normalisedRating, comment: comment ?? null });
 
     } else if (type === 'platform_prediction') {
-      await supabaseInsert('platform_predictions', { visitor_id, service_uid, station_crs, scheduled_depart, predicted_platform
+      await supabaseInsert('platform_predictions', { visitor_id, service_uid, station_crs, scheduled_depart, predicted_platform, predicted_tier });
+
+    } else {
+      return res.status(400).json({ error: 'Unknown type' });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('Analytics error:', err.message);
+    return res.status(500).json({ error: 'Failed to log' });
+  }
+}
