@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       await supabaseInsert('feedback', { visitor_id, station_code, destination, operator, platform, platform_tier, seating_guidance });
 
     } else if (type === 'product_feedback') {
-      const normalisedRating = rating === 'up' || rating === 1 ? 1 : -1;
+      const normalisedRating = rating === 'yes' || rating === 'up' || rating === 1 ? 'thumbs_up' : 'thumbs_down';
       await supabaseInsert('product_feedback', { visitor_id, rating: normalisedRating, comment: comment ?? null });
 
     } else if (type === 'platform_prediction') {
