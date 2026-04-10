@@ -637,8 +637,11 @@ function DonationWidget({ dark }) {
   );
 }
 
-function DepartureCard({ svc, allServices }) {
+// ─── CHANGED: added stationCode prop + platform_prediction tracking ───
+function DepartureCard({ svc, allServices, stationCode }) {
   const [expanded, setExpanded] = useState(false);
+  const trackedRef = useRef(false);
+
   const status   = getStatus(svc);
   const plat     = getPlatform(svc);
   const dest     = getDestination(svc);
@@ -654,6 +657,22 @@ function DepartureCard({ svc, allServices }) {
   const reasons   = svc.reasons;
   const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
   const platMsg   = getPlatformMessage(svc, allServices);
+  const uid       = svc.scheduleMetadata?.uniqueIdentity;
+
+  // Fire once per service when a real platform is first shown
+  useEffect(() => {
+    if (trackedRef.current) return;
+    if (!uid) return;
+    if (plat.tier === "unknown" || plat.tier === "cancelled") return;
+    trackedRef.current = true;
+    trackEvent("platform_prediction", {
+      service_uid: uid,
+      station_crs: stationCode,
+      scheduled_depart: scheduled,
+      predicted_platform: plat.text,
+      predicted_tier: plat.tier,
+    });
+  }, [plat.tier, uid, stationCode, scheduled]);
 
   return (
     <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
@@ -955,7 +974,8 @@ export default function App() {
               <>
                 <CompactLegend/>
                 <div className="card-list" role="list" aria-label="Departures">
-                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs}/>)}
+                  {/* CHANGED: passes stationCode so DepartureCard can log predictions */}
+                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs} stationCode={station?.code}/>)}
                 </div>
                 <div className="rtt-credit">
                   Data provided by <a href="https://realtimetrains.co.uk" target="_blank" rel="noopener noreferrer">Realtime Trains</a>
