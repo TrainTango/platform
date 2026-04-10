@@ -22,7 +22,13 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const { type, visitor_id, station_code, station_name, destination, operator, platform, platform_tier, seating_guidance } = req.body || {};
+  const {
+    type, visitor_id,
+    station_code, station_name,
+    destination, operator, platform, platform_tier, seating_guidance,
+    rating, comment,
+    service_uid, station_crs, scheduled_depart, predicted_platform, predicted_tier,
+  } = req.body || {};
 
   if (!type || !visitor_id) {
     return res.status(400).json({ error: 'Missing type or visitor_id' });
@@ -31,16 +37,16 @@ export default async function handler(req, res) {
   try {
     if (type === 'page_view') {
       await supabaseInsert('page_views', { visitor_id });
+
     } else if (type === 'station_search') {
       await supabaseInsert('station_searches', { visitor_id, station_code, station_name });
+
     } else if (type === 'feedback') {
       await supabaseInsert('feedback', { visitor_id, station_code, destination, operator, platform, platform_tier, seating_guidance });
-    } else {
-      return res.status(400).json({ error: 'Unknown type' });
-    }
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('Analytics error:', err.message);
-    return res.status(500).json({ error: 'Failed to log' });
-  }
-}
+
+    } else if (type === 'product_feedback') {
+      const normalisedRating = rating === 'up' || rating === 1 ? 1 : -1;
+      await supabaseInsert('product_feedback', { visitor_id, rating: normalisedRating, comment: comment ?? null });
+
+    } else if (type === 'platform_prediction') {
+      await supabaseInsert('platform_predictions', { visitor_id, service_uid, station_crs, scheduled_depart, predicted_platform
