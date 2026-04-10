@@ -6,7 +6,6 @@ const API_BASE = "/api";
 const REFRESH_INTERVAL = 30000;
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_KEY);
 
-// ── Analytics ──
 function getVisitorId() {
   try {
     let id = localStorage.getItem("platform_visitor");
@@ -25,7 +24,6 @@ function trackEvent(type, data) {
   } catch {}
 }
 
-// ── Seating Guidance ──
 const COACH_GUIDANCE = {
   "LNER": { confidence: "high", coaches: "C", short: "Head to Coach C for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: C" },
   "Hull Trains": { confidence: "high", coaches: "A", short: "Head to Coach A for unreserved seats.", cardLabel: "\uD83D\uDCBA Unreserved: A" },
@@ -65,7 +63,6 @@ function getGuidance(operator, numVehicles) {
   return COACH_GUIDANCE[operator] || null;
 }
 
-// ── Recent Stations ──
 function getRecent() {
   try { const r = JSON.parse(localStorage.getItem("platform_recent")); return Array.isArray(r) ? r.slice(0, 3) : []; }
   catch { return []; }
@@ -78,7 +75,6 @@ function saveRecent(station) {
   } catch {}
 }
 
-// ── API ──
 async function fetchStations() {
   const r = await fetch(`${API_BASE}/stations`);
   if (!r.ok) throw new Error("Failed to fetch stations");
@@ -101,7 +97,6 @@ async function fetchDepartures(code) {
   return { departures, allServices: all };
 }
 
-// ── Helpers ──
 function fmtTime(iso) {
   if (!iso) return "--:--";
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -157,7 +152,6 @@ function svcKey(svc) {
   return uid || `${getDestination(svc)}-${getScheduledTime(svc)}`;
 }
 
-// ── Platform Messaging ──
 const OCCUPYING_STATUSES = new Set(["AT_PLATFORM", "DEPART_PREPARING", "DEPART_READY", "ARRIVING"]);
 
 function isSameService(a, b) {
@@ -204,7 +198,6 @@ function getPlatformMessage(userService, allServices) {
   return { title: isChanged ? `Platform changed to ${platNum} \u2014 head there now` : `Platform ${platNum} confirmed \u2014 head there now`, description: "Get there early and be first to board.", icon: isChanged ? "\u26A0\uFE0F" : "\u2705", cardLabel: isChanged ? "Changed" : "Confirmed", tier: "go", tipClass: isChanged ? "tip-platform-changed" : "tip-platform" };
 }
 
-// ── Styles ──
 function getCSS(dark) {
   const t = dark ? {
     bg:"#090913",bgCard:"#101020",bgCardHover:"#141428",bgInput:"#16162a",
@@ -277,14 +270,17 @@ function getCSS(dark) {
   @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
   .toast-icon{font-size:16px;flex-shrink:0}
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
-  .card-list{padding:6px 10px 80px;display:flex;flex-direction:column;gap:6px}
+  .card-list{padding:6px 10px 0;display:flex;flex-direction:column;gap:6px}
+  .rtt-credit{text-align:center;padding:16px 20px 32px;font-size:11px;color:var(--text-dim)}
+  .rtt-credit a{color:var(--text)!important;text-decoration:none;font-weight:600}
+  .rtt-credit a:hover{opacity:.8}
   .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
   .dep-card.delayed{border-left-color:var(--amber)}
   .dep-card.cancelled{border-left-color:var(--red);opacity:.55}
   .countdown-col{display:flex;flex-direction:column;align-items:center;min-width:48px}
-  .countdown-num{font-size:26px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+  .countdown-num{font-size:20px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
   .countdown-due{font-size:18px;font-weight:900;color:var(--green)}
   .countdown-unit{font-size:11px;font-weight:600;color:var(--text-dim);margin-top:1px}
   .info-col{display:flex;flex-direction:column;gap:3px;min-width:0}
@@ -316,13 +312,13 @@ function getCSS(dark) {
   .plat-status-expected{color:var(--text-dim)}
   .plat-status-unknown{color:var(--text-dim)}
   .expanded-area{grid-column:1/-1;padding-top:10px;margin-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
-  .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start}
+  .tip-card{border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center}
   .tip-platform{background:rgba(45,106,79,.06);border:1px solid rgba(45,106,79,.15)}
   .tip-platform-changed{background:rgba(232,98,58,.08);border:1px solid rgba(232,98,58,.2)}
   .tip-coach{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12)}
   .tip-hint{background:var(--bg-input);border:1px solid var(--border)}
   .tip-free{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12)}
-  .tip-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+  .tip-icon{font-size:16px;flex-shrink:0}
   .tip-content{display:flex;flex-direction:column;gap:2px}
   .tip-title{font-size:12px;font-weight:700;color:var(--text)}
   .tip-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
@@ -353,12 +349,9 @@ function getCSS(dark) {
   .empty-icon{font-size:32px;margin-bottom:10px;opacity:.4}
   .empty-text{color:var(--text-muted);font-size:13px}
 
-  /* ── Feedback FAB (bottom-left) ── */
   .fab{position:fixed;bottom:24px;left:max(20px,calc((100vw - 480px) / 2 + 20px));width:44px;height:44px;border-radius:50%;background:var(--bg-card);border:1.5px solid var(--border);box-shadow:0 4px 16px var(--shadow);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-dim);z-index:90;transition:transform .2s,box-shadow .2s,border-color .2s,color .2s}
   .fab:hover{transform:scale(1.1);box-shadow:0 6px 24px var(--shadow);border-color:var(--accent);color:var(--accent)}
   .fab:active{transform:scale(.96)}
-
-  /* ── Feedback modal ── */
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fadeOverlay .2s ease-out}
   @keyframes fadeOverlay{from{opacity:0}to{opacity:1}}
   .modal{width:100%;max-width:480px;background:var(--bg-card);border-radius:20px 20px 0 0;padding:12px 20px 40px;animation:slideUp .28s cubic-bezier(.32,1.1,.5,1)}
@@ -389,8 +382,6 @@ function getCSS(dark) {
   .modal-done-icon{font-size:44px}
   .modal-done-title{font-size:17px;font-weight:800;color:var(--text)}
   .modal-done-sub{font-size:13px;color:var(--text-muted);line-height:1.5;max-width:260px}
-
-  /* ── Donation widget ── */
   .donate-fab{position:fixed;bottom:24px;right:max(20px,calc((100vw - 480px) / 2 + 20px));width:44px;height:44px;border-radius:50%;background:#5F7FFF;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;z-index:90;box-shadow:0 4px 20px rgba(95,127,255,.45);transition:transform .2s,box-shadow .2s}
   .donate-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(95,127,255,.55)}
   .donate-fab:active{transform:scale(.95)}
@@ -430,15 +421,12 @@ function getCSS(dark) {
   `;
 }
 
-// ── Icons ──
 const SearchIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
 const BackIcon  = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const SunIcon   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 const ChatIcon  = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-const CoffeeIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>;
 
-// ── Feedback Modal ──
 const PLACEHOLDERS = {
   yes: "What's working well? Any suggestions?",
   no:  "What could be better? We read every response.",
@@ -494,7 +482,6 @@ function FeedbackModal({ onClose }) {
   );
 }
 
-// ── Stripe payment form (step 2) ──
 function DonationPaymentForm({ onSuccess }) {
   const stripe   = useStripe();
   const elements = useElements();
@@ -526,23 +513,21 @@ function DonationPaymentForm({ onSuccess }) {
   );
 }
 
-// ── Donation Widget ──
 function DonationWidget({ dark }) {
   const [open, setOpen]             = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [amount, setAmount]         = useState(3);      // selected quick amount
-  const [customAmount, setCustomAmount] = useState(""); // typed amount
+  const [amount, setAmount]         = useState(3);
+  const [customAmount, setCustomAmount] = useState("");
   const [monthly, setMonthly]       = useState(false);
   const [name, setName]             = useState("");
   const [message, setMessage]       = useState("");
-  const [step, setStep]             = useState("form"); // "form" | "payment" | "success"
+  const [step, setStep]             = useState("form");
   const [clientSecret, setClientSecret] = useState(null);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
 
   const finalAmount = customAmount ? parseFloat(customAmount) : amount;
 
-  // Show tooltip once after 3s, auto-hide after 5s
   useEffect(() => {
     const show = setTimeout(() => setShowTooltip(true), 3000);
     return () => clearTimeout(show);
@@ -557,10 +542,7 @@ function DonationWidget({ dark }) {
 
   function handleClose() {
     setOpen(false);
-    // Reset form if not mid-payment
-    if (step !== "payment") {
-      setStep("form"); setClientSecret(null); setError(null);
-    }
+    if (step !== "payment") { setStep("form"); setClientSecret(null); setError(null); }
   }
 
   async function handleContinue() {
@@ -576,11 +558,8 @@ function DonationWidget({ dark }) {
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       setClientSecret(data.clientSecret);
       setStep("payment");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }
 
   const stripeAppearance = {
@@ -595,16 +574,11 @@ function DonationWidget({ dark }) {
           Enjoying GoPlatform? Help a Yorkshireman keep building
         </div>
       )}
-
-      <button className="donate-fab" onClick={handleOpen} aria-label="Support this project">
-        ❤️
-      </button>
-
+      <button className="donate-fab" onClick={handleOpen} aria-label="Support this project">❤️</button>
       {open && (
         <div className="donate-overlay" onClick={handleClose}>
           <div className="donate-panel" onClick={e => e.stopPropagation()}>
             <div className="donate-handle"/>
-
             {step === "success" && (
               <div className="donate-success">
                 <div className="donate-success-icon">🙏</div>
@@ -612,7 +586,6 @@ function DonationWidget({ dark }) {
                 <div className="donate-success-sub">Thank you for the support.</div>
               </div>
             )}
-
             {step === "payment" && clientSecret && (
               <>
                 <div className="donate-header">
@@ -624,48 +597,33 @@ function DonationWidget({ dark }) {
                 </Elements>
               </>
             )}
-
             {step === "form" && (
               <>
                 <div className="donate-header">
                   <span className="donate-title">Support Lawrence Byers</span>
                   <button className="donate-close" onClick={handleClose} aria-label="Close">✕</button>
                 </div>
-
-                {/* Amount */}
                 <div className="donate-amount-row">
                   <div className="donate-amount-input-wrap">
                     <span className="donate-currency">£</span>
-                    <input
-                      className="donate-amount-input"
-                      type="number" min="1" placeholder="Enter amount"
-                      value={customAmount}
-                      onChange={e => { setCustomAmount(e.target.value); setAmount(null); }}
-                    />
+                    <input className="donate-amount-input" type="number" min="1" placeholder="Enter amount"
+                      value={customAmount} onChange={e => { setCustomAmount(e.target.value); setAmount(null); }}/>
                   </div>
                   <button className={`donate-quick ${amount === 3 && !customAmount ? "active" : ""}`}
                     onClick={() => { setAmount(3); setCustomAmount(""); }}>+£3</button>
                   <button className={`donate-quick ${amount === 5 && !customAmount ? "active" : ""}`}
                     onClick={() => { setAmount(5); setCustomAmount(""); }}>+£5</button>
                 </div>
-
-                {/* Name */}
                 <input className="donate-field" placeholder="Name or @yoursocial" value={name} onChange={e => setName(e.target.value)}/>
-
-                {/* Message */}
                 <textarea className="donate-field" placeholder="Say something nice…" rows={3} value={message} onChange={e => setMessage(e.target.value)}/>
-
-                {/* Monthly */}
                 <label className="donate-monthly">
                   <input type="checkbox" checked={monthly} onChange={e => setMonthly(e.target.checked)}/>
                   Make this monthly
                 </label>
-
                 {error && <div className="donate-error">{error}</div>}
                 {finalAmount > 0 && finalAmount < 1 && (
                   <div className="donate-error">Pop in at least £1 to continue</div>
                 )}
-
                 <button className="donate-submit-btn" disabled={loading || !finalAmount || finalAmount < 1} onClick={handleContinue}>
                   {loading ? "Loading…" : "Support"}
                 </button>
@@ -679,7 +637,6 @@ function DonationWidget({ dark }) {
   );
 }
 
-// ── Departure Card ──
 function DepartureCard({ svc, allServices }) {
   const [expanded, setExpanded] = useState(false);
   const status   = getStatus(svc);
@@ -727,7 +684,6 @@ function DepartureCard({ svc, allServices }) {
         </div>
         <span className={`plat-status plat-status-${plat.tier}`}>{platMsg.cardLabel}</span>
       </div>
-
       {expanded && (
         <div className="expanded-area">
           {platMsg.tier !== "unknown" && (
@@ -788,7 +744,6 @@ function CompactLegend() {
   );
 }
 
-// ── App ──
 export default function App() {
   const [dark, setDark] = useState(() => {
     try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
@@ -906,8 +861,6 @@ export default function App() {
     <>
       <style>{getCSS(dark)}</style>
       <div className="app">
-
-        {/* ── Toasts ── */}
         {toasts.length > 0 && (
           <div className="toast-wrap" role="alert" aria-live="assertive">
             {toasts.map(t => (
@@ -922,20 +875,16 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Feedback modal ── */}
         {showFeedback && <FeedbackModal onClose={() => { setShowFeedback(false); setFeedbackSubmitted(true); }}/>}
 
-        {/* ── Feedback FAB (bottom-left) ── */}
         {!feedbackSubmitted && !showFeedback && (
           <button className="fab" aria-label="Share feedback" title="Share feedback" onClick={() => setShowFeedback(true)}>
             <ChatIcon/>
           </button>
         )}
 
-        {/* ── Donation widget (bottom-right) ── */}
         <DonationWidget dark={dark}/>
 
-        {/* ── Search screen ── */}
         {screen === "search" && (
           <div className="search-screen">
             <button className="theme-toggle" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
@@ -978,7 +927,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Board screen ── */}
         {screen === "board" && (
           <div className="board-screen">
             <div className="board-header">
