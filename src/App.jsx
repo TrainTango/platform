@@ -231,9 +231,9 @@ function getCSS(dark) {
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
   .search-screen{display:flex;flex-direction:column;align-items:center;padding:0 20px;padding-top:10vh;min-height:100vh}
-  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;margin-bottom:2px}
+  .logo{font-size:44px;font-weight:900;letter-spacing:-2px;margin-bottom:2px;line-height:1}
   .logo-go{color:#6366f1}
-  .logo-platform{background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .logo-platform{color:var(--text)}
   .tagline{color:var(--text-dim);font-size:14px;font-weight:500;margin-bottom:24px;letter-spacing:.3px}
   .search-wrap{width:100%;position:relative}
   .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
@@ -465,7 +465,7 @@ function FeedbackModal({ onClose }) {
           <div className="modal-done">
             <div className="modal-done-icon">🙏</div>
             <div className="modal-done-title">Thanks for the feedback</div>
-            <div className="modal-done-sub">It genuinely helps us improve Platform for everyone.</div>
+            <div className="modal-done-sub">It genuinely helps us improve GoPlatform for everyone.</div>
           </div>
         ) : (
           <>
@@ -473,7 +473,7 @@ function FeedbackModal({ onClose }) {
               <span className="modal-title">Share feedback</span>
               <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
             </div>
-            <p className="modal-sub">Is Platform useful? Takes 20 seconds.</p>
+            <p className="modal-sub">Is GoPlatform useful? Takes 20 seconds.</p>
             <div className="rating-row">
               <button className={`rating-btn ${rating === "yes" ? "selected-yes" : ""}`} onClick={() => setRating(r => r === "yes" ? null : "yes")}>
                 <span className="rating-emoji">👍</span>
@@ -592,7 +592,7 @@ function DonationWidget({ dark }) {
     <>
       {showTooltip && !open && (
         <div className="donate-tooltip">
-          Enjoying Platform? Help a Yorkshireman keep building
+          Enjoying GoPlatform? Help a Yorkshireman keep building
         </div>
       )}
 
