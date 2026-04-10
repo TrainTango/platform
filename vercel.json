@@ -5,7 +5,14 @@
     { "source": "/api/service", "destination": "/api/service" },
     { "source": "/api/analytics", "destination": "/api/analytics" },
     { "source": "/api/donate", "destination": "/api/donate" },
+    { "source": "/api/cron/reconcile-platforms", "destination": "/api/cron/reconcile-platforms" },
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/reconcile-platforms",
+      "schedule": "*/15 * * * *"
+    }
   ],
   "headers": [
     {
