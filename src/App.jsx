@@ -277,10 +277,7 @@ function getCSS(dark) {
   @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
   .toast-icon{font-size:16px;flex-shrink:0}
   .toast-close{background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;padding:4px;margin-left:auto;font-size:16px;line-height:1}
-  .card-list{padding:6px 10px 0;display:flex;flex-direction:column;gap:6px}
-  .rtt-credit{text-align:center;padding:16px 20px 80px;font-size:11px;color:var(--text-dim)}
-  .rtt-credit a{color:var(--text)!important;text-decoration:none;font-weight:600}
-  .rtt-credit a:hover{opacity:.8}
+  .card-list{padding:6px 10px 80px;display:flex;flex-direction:column;gap:6px}
   .dep-card{background:var(--bg-card);border-radius:12px;border-left:3.5px solid;display:grid;grid-template-columns:56px 1fr auto;gap:4px 10px;padding:12px 12px 12px 12px;align-items:center;cursor:pointer;transition:background .15s}
   .dep-card:hover{background:var(--bg-card-hover)}
   .dep-card.on-time{border-left-color:var(--green)}
@@ -439,6 +436,7 @@ const BackIcon  = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="no
 const SunIcon   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
 const MoonIcon  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>;
 const ChatIcon  = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+const CoffeeIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>;
 
 // ── Feedback Modal ──
 const PLACEHOLDERS = {
@@ -481,4 +479,544 @@ function FeedbackModal({ onClose }) {
                 <span className="rating-emoji">👍</span>
                 <span className="rating-label">Yes, it helps</span>
               </button>
-              <button className={`rating-btn ${rating === "no" ? "selected-
+              <button className={`rating-btn ${rating === "no" ? "selected-no" : ""}`} onClick={() => setRating(r => r === "no" ? null : "no")}>
+                <span className="rating-emoji">👎</span>
+                <span className="rating-label">Needs work</span>
+              </button>
+            </div>
+            <label className="comment-label" htmlFor="fb-comment">Comments</label>
+            <textarea id="fb-comment" className="comment-input" rows={3} placeholder={PLACEHOLDERS[rating]} value={comment} onChange={e => setComment(e.target.value)}/>
+            <button className="submit-btn" disabled={!rating} onClick={submit}>Send feedback</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Stripe payment form (step 2) ──
+function DonationPaymentForm({ onSuccess }) {
+  const stripe   = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setLoading(true); setError(null);
+    const { error } = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: "if_required",
+    });
+    if (error) { setError(error.message); setLoading(false); }
+    else onSuccess();
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <PaymentElement options={{ layout: "tabs" }}/>
+      {error && <div className="donate-error" style={{marginTop:12}}>{error}</div>}
+      <button type="submit" className="donate-submit-btn" disabled={!stripe || loading}>
+        {loading ? "Processing…" : "Support"}
+      </button>
+      <div className="donate-stripe-badge">Powered by <strong>Stripe</strong></div>
+    </form>
+  );
+}
+
+// ── Donation Widget ──
+function DonationWidget({ dark }) {
+  const [open, setOpen]             = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [amount, setAmount]         = useState(3);      // selected quick amount
+  const [customAmount, setCustomAmount] = useState(""); // typed amount
+  const [monthly, setMonthly]       = useState(false);
+  const [name, setName]             = useState("");
+  const [message, setMessage]       = useState("");
+  const [step, setStep]             = useState("form"); // "form" | "payment" | "success"
+  const [clientSecret, setClientSecret] = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+
+  const finalAmount = customAmount ? parseFloat(customAmount) : amount;
+
+  // Show tooltip once after 3s, auto-hide after 5s
+  useEffect(() => {
+    const show = setTimeout(() => setShowTooltip(true), 3000);
+    return () => clearTimeout(show);
+  }, []);
+  useEffect(() => {
+    if (!showTooltip) return;
+    const hide = setTimeout(() => setShowTooltip(false), 5000);
+    return () => clearTimeout(hide);
+  }, [showTooltip]);
+
+  function handleOpen() { setOpen(true); setShowTooltip(false); }
+
+  function handleClose() {
+    setOpen(false);
+    // Reset form if not mid-payment
+    if (step !== "payment") {
+      setStep("form"); setClientSecret(null); setError(null);
+    }
+  }
+
+  async function handleContinue() {
+    if (!finalAmount || finalAmount < 1) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/donate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: finalAmount, recurring: monthly, name, message }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      setClientSecret(data.clientSecret);
+      setStep("payment");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const stripeAppearance = {
+    theme: dark ? "night" : "stripe",
+    variables: { colorPrimary: "#5F7FFF", borderRadius: "10px", fontFamily: "Inter, system-ui, sans-serif" },
+  };
+
+  return (
+    <>
+      {showTooltip && !open && (
+        <div className="donate-tooltip">
+          Enjoying GoPlatform? Help a Yorkshireman keep building
+        </div>
+      )}
+
+      <button className="donate-fab" onClick={handleOpen} aria-label="Support this project">
+        ❤️
+      </button>
+
+      {open && (
+        <div className="donate-overlay" onClick={handleClose}>
+          <div className="donate-panel" onClick={e => e.stopPropagation()}>
+            <div className="donate-handle"/>
+
+            {step === "success" && (
+              <div className="donate-success">
+                <div className="donate-success-icon">🙏</div>
+                <div className="donate-success-title">You're a good 'un.</div>
+                <div className="donate-success-sub">Thank you for the support.</div>
+              </div>
+            )}
+
+            {step === "payment" && clientSecret && (
+              <>
+                <div className="donate-header">
+                  <span className="donate-title">Support Lawrence Byers</span>
+                  <button className="donate-close" onClick={handleClose} aria-label="Close">✕</button>
+                </div>
+                <Elements stripe={stripePromise} options={{ clientSecret, appearance: stripeAppearance }}>
+                  <DonationPaymentForm onSuccess={() => setStep("success")}/>
+                </Elements>
+              </>
+            )}
+
+            {step === "form" && (
+              <>
+                <div className="donate-header">
+                  <span className="donate-title">Support Lawrence Byers</span>
+                  <button className="donate-close" onClick={handleClose} aria-label="Close">✕</button>
+                </div>
+
+                {/* Amount */}
+                <div className="donate-amount-row">
+                  <div className="donate-amount-input-wrap">
+                    <span className="donate-currency">£</span>
+                    <input
+                      className="donate-amount-input"
+                      type="number" min="1" placeholder="Enter amount"
+                      value={customAmount}
+                      onChange={e => { setCustomAmount(e.target.value); setAmount(null); }}
+                    />
+                  </div>
+                  <button className={`donate-quick ${amount === 3 && !customAmount ? "active" : ""}`}
+                    onClick={() => { setAmount(3); setCustomAmount(""); }}>+£3</button>
+                  <button className={`donate-quick ${amount === 5 && !customAmount ? "active" : ""}`}
+                    onClick={() => { setAmount(5); setCustomAmount(""); }}>+£5</button>
+                </div>
+
+                {/* Name */}
+                <input className="donate-field" placeholder="Name or @yoursocial" value={name} onChange={e => setName(e.target.value)}/>
+
+                {/* Message */}
+                <textarea className="donate-field" placeholder="Say something nice…" rows={3} value={message} onChange={e => setMessage(e.target.value)}/>
+
+                {/* Monthly */}
+                <label className="donate-monthly">
+                  <input type="checkbox" checked={monthly} onChange={e => setMonthly(e.target.checked)}/>
+                  Make this monthly
+                </label>
+
+                {error && <div className="donate-error">{error}</div>}
+                {finalAmount > 0 && finalAmount < 1 && (
+                  <div className="donate-error">Pop in at least £1 to continue</div>
+                )}
+
+                <button className="donate-submit-btn" disabled={loading || !finalAmount || finalAmount < 1} onClick={handleContinue}>
+                  {loading ? "Loading…" : "Support"}
+                </button>
+                <div className="donate-stripe-badge">Powered by <strong>Stripe</strong></div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Departure Card ──
+function DepartureCard({ svc, allServices }) {
+  const [expanded, setExpanded] = useState(false);
+  const status   = getStatus(svc);
+  const plat     = getPlatform(svc);
+  const dest     = getDestination(svc);
+  const operator = getOperator(svc);
+  const scheduled = getScheduledTime(svc);
+  const effective = getEffectiveTime(svc);
+  const mins     = minsUntil(effective);
+  const isDelayed = status.key === "delayed";
+  const vehicles  = svc.locationMetadata?.numberOfVehicles;
+  const guidance  = getGuidance(operator, vehicles);
+  const isNoReservation = NO_RESERVATION_OPERATORS.has(operator);
+  const isCompulsory    = COMPULSORY_RESERVATION.has(operator);
+  const reasons   = svc.reasons;
+  const cancelReason = reasons?.find(r => r.type === "CANCEL")?.shortText || reasons?.find(r => r.type === "DELAY")?.shortText;
+  const platMsg   = getPlatformMessage(svc, allServices);
+
+  return (
+    <div className={`dep-card ${status.key}`} role="button" tabIndex={0} aria-expanded={expanded}
+      onClick={() => setExpanded(e => !e)} onKeyDown={e => e.key === "Enter" && setExpanded(x => !x)}>
+      <div className="countdown-col">
+        <span className="countdown-num">{fmtTime(scheduled)}</span>
+        {mins !== null && mins > 0 ? <span className="countdown-unit">{mins} min</span>
+          : mins === 0 ? <span className="countdown-due">Due</span> : null}
+      </div>
+      <div className="info-col">
+        <span className="dest-name">{dest}</span>
+        <div className="meta-row">
+          <span className={`status-badge status-${status.key}`}>{status.label}</span>
+          {status.key !== "cancelled" && guidance && (
+            <span className={`coach-pill ${guidance.confidence === "hint" ? "coach-pill-hint" : ""}`}>{guidance.cardLabel}</span>
+          )}
+          {status.key !== "cancelled" && isNoReservation && <span className="coach-pill coach-pill-free">{"\u2705"} No reservations</span>}
+          {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && <span className="coach-pill coach-pill-none">{"\u2139\uFE0F"} No seating info</span>}
+          <span className="operator-name">{operator}{vehicles ? ` \u00B7 ${vehicles} coaches` : ""}</span>
+        </div>
+      </div>
+      <div className="plat-col">
+        <div className={`plat-badge plat-${plat.tier}`}>
+          {plat.text}
+          {plat.tier === "confirmed" && <span className="plat-badge-icon plat-icon-confirmed">{"\u2713"}</span>}
+          {plat.tier === "changed"   && <span className="plat-badge-icon plat-icon-changed">!</span>}
+          {plat.tier === "expected"  && <span className="plat-badge-icon plat-icon-expected">?</span>}
+        </div>
+        <span className={`plat-status plat-status-${plat.tier}`}>{platMsg.cardLabel}</span>
+      </div>
+
+      {expanded && (
+        <div className="expanded-area">
+          {platMsg.tier !== "unknown" && (
+            <div className={`tip-card ${platMsg.tipClass}`}>
+              <span className="tip-icon">{platMsg.icon}</span>
+              <div className="tip-content">
+                <span className="tip-title">{platMsg.title}</span>
+                {platMsg.description && <span className="tip-desc">{platMsg.description}</span>}
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && guidance && guidance.confidence === "high" && (
+            <div className="tip-card tip-coach"><span className="tip-icon">{"\uD83D\uDCBA"}</span><div className="tip-content"><span className="tip-title">{guidance.short}</span></div></div>
+          )}
+          {status.key !== "cancelled" && guidance && guidance.confidence === "hint" && (
+            <div className="tip-card tip-hint">
+              <span className="tip-icon">{"\uD83D\uDCA1"}</span>
+              <div className="tip-content">
+                <span className="tip-title">{guidance.short}</span>
+                {isPeakHour() && <span className="tip-peak">{"\u23F0"} Peak time — unreserved seats fill quickly.</span>}
+                <div className="tip-meta">
+                  {guidance.verified && <span className="tip-verified">Verified {guidance.verified}</span>}
+                  <button className="tip-report" onClick={e => { e.stopPropagation(); alert("Thanks! We'll review this."); }}>Report incorrect</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {status.key !== "cancelled" && isNoReservation && (
+            <div className="tip-card tip-free"><span className="tip-icon">{"\u2705"}</span><div className="tip-content"><span className="tip-title">No reservations — every seat is first come, first served.</span></div></div>
+          )}
+          {status.key !== "cancelled" && isCompulsory && (
+            <div className="tip-card tip-hint"><span className="tip-icon">{"\u26A0\uFE0F"}</span><div className="tip-content"><span className="tip-title">Reservation required — check your booking for coach and seat.</span></div></div>
+          )}
+          {status.key !== "cancelled" && !guidance && !isNoReservation && !isCompulsory && (
+            <div className="tip-card tip-hint"><span className="tip-icon">{"\u2139\uFE0F"}</span><div className="tip-content"><span className="tip-title">No seating info — look for unreserved seats when you get on the train.</span></div></div>
+          )}
+          {cancelReason && <div className="cancel-reason">Reason: {cancelReason}</div>}
+          <div className="detail-row">
+            <div className="detail-item"><span className="detail-label">Operator</span><span className="detail-value">{operator}</span></div>
+            <div className="detail-item"><span className="detail-label">Scheduled</span><span className="detail-value">{fmtTime(scheduled)}</span></div>
+            {isDelayed && <div className="detail-item"><span className="detail-label">Expected</span><span className="detail-value" style={{color:"var(--amber)"}}>{fmtTime(effective)}</span></div>}
+            {vehicles && <div className="detail-item"><span className="detail-label">Coaches</span><span className="detail-value">{vehicles}</span></div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompactLegend() {
+  return (
+    <div className="legend-bar" role="legend" aria-label="Platform badge legend">
+      <div className="legend-item"><div className="legend-dot legend-dot-confirmed"/> Confirmed</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-changed"/> Changed</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-expected"/> Expected</div>
+      <div className="legend-item"><div className="legend-dot legend-dot-unknown"/> Unknown</div>
+    </div>
+  );
+}
+
+// ── App ──
+export default function App() {
+  const [dark, setDark] = useState(() => {
+    try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
+  });
+  const [screen, setScreen]     = useState("search");
+  const [stations, setStations] = useState([]);
+  const [query, setQuery]       = useState("");
+  const [filtered, setFiltered] = useState([]);
+  const [showDrop, setShowDrop] = useState(false);
+  const [station, setStation]   = useState(null);
+  const [deps, setDeps]         = useState(null);
+  const [allSvcs, setAllSvcs]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState(null);
+  const [lastUpDate, setLastUpDate] = useState(null);
+  const [lastUpText, setLastUpText] = useState("");
+  const [clock, setClock]       = useState(nowHHMM());
+  const [refreshPct, setRefreshPct] = useState(0);
+  const [toasts, setToasts]     = useState([]);
+  const [recent, setRecent]     = useState(getRecent);
+  const [showFeedback, setShowFeedback]         = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+
+  const prevDepsRef = useRef(null);
+  const timerRef    = useRef(null);
+  const clockRef    = useRef(null);
+  const pctRef      = useRef(null);
+  const inputRef    = useRef(null);
+
+  useEffect(() => {
+    fetchStations().then(setStations).catch(err => console.error("Stations:", err));
+    trackEvent("page_view");
+  }, []);
+
+  useEffect(() => {
+    clockRef.current = setInterval(() => {
+      setClock(nowHHMM());
+      if (lastUpDate) setLastUpText(relativeTime(lastUpDate));
+    }, 1000);
+    return () => clearInterval(clockRef.current);
+  }, [lastUpDate]);
+
+  useEffect(() => {
+    if (!query.trim()) { setFiltered([]); setShowDrop(false); return; }
+    const q = query.toLowerCase();
+    setFiltered(stations.filter(s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)).slice(0, 8));
+    setShowDrop(true);
+  }, [query, stations]);
+
+  const detectChanges = useCallback((newServices) => {
+    if (!prevDepsRef.current) { prevDepsRef.current = newServices; return; }
+    const oldMap = {};
+    prevDepsRef.current.forEach(s => { oldMap[svcKey(s)] = getPlatform(s); });
+    const newToasts = [];
+    newServices.forEach(s => {
+      const key = svcKey(s), oldP = oldMap[key], newP = getPlatform(s);
+      if (oldP && newP.text !== oldP.text && newP.tier !== "unknown" && newP.tier !== "cancelled") {
+        newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: newP.tier });
+        try { navigator.vibrate?.(200); } catch {}
+      }
+      if (oldP && oldP.tier === "expected" && newP.tier === "confirmed" && oldP.text === newP.text) {
+        newToasts.push({ id: Date.now() + Math.random(), dest: getDestination(s), plat: newP.text, tier: "now-confirmed" });
+        try { navigator.vibrate?.(100); } catch {}
+      }
+    });
+    if (newToasts.length) setToasts(t => [...t, ...newToasts]);
+    prevDepsRef.current = newServices;
+  }, []);
+
+  const loadDepartures = useCallback(async (code) => {
+    setLoading(true); setError(null);
+    try {
+      const data = await fetchDepartures(code);
+      setAllSvcs(data.allServices);
+      detectChanges(data.departures);
+      setDeps(data.departures);
+      const now = new Date();
+      setLastUpDate(now); setLastUpText(relativeTime(now)); setRefreshPct(0);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [detectChanges]);
+
+  const selectStation = useCallback((s) => {
+    setStation(s); setQuery(""); setShowDrop(false);
+    saveRecent(s); setRecent(getRecent());
+    prevDepsRef.current = null;
+    trackEvent("station_search", { station_code: s.code, station_name: s.name });
+    setScreen("board"); loadDepartures(s.code);
+  }, [loadDepartures]);
+
+  useEffect(() => {
+    if (screen !== "board" || !station) return;
+    let elapsed = 0;
+    pctRef.current = setInterval(() => { elapsed += 1000; setRefreshPct(Math.min((elapsed / REFRESH_INTERVAL) * 100, 100)); }, 1000);
+    timerRef.current = setInterval(() => { elapsed = 0; setRefreshPct(0); loadDepartures(station.code); }, REFRESH_INTERVAL);
+    return () => { clearInterval(timerRef.current); clearInterval(pctRef.current); };
+  }, [screen, station, loadDepartures]);
+
+  const goBack = () => {
+    setScreen("search"); setDeps(null); setAllSvcs([]); setError(null); setToasts([]);
+    clearInterval(timerRef.current); clearInterval(pctRef.current);
+    prevDepsRef.current = null;
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const dismissToast = id => setToasts(t => t.filter(x => x.id !== id));
+
+  useEffect(() => {
+    if (!toasts.length) return;
+    const timer = setTimeout(() => setToasts(t => t.slice(1)), 8000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
+
+  return (
+    <>
+      <style>{getCSS(dark)}</style>
+      <div className="app">
+
+        {/* ── Toasts ── */}
+        {toasts.length > 0 && (
+          <div className="toast-wrap" role="alert" aria-live="assertive">
+            {toasts.map(t => (
+              <div className="toast" key={t.id}>
+                <span className="toast-icon">{t.tier === "now-confirmed" ? "\u2705" : "\u26A0\uFE0F"}</span>
+                {t.tier === "now-confirmed"
+                  ? <span>Platform {t.plat} now <strong>confirmed</strong> for {t.dest}</span>
+                  : <span>Platform changed to <strong>{t.plat}</strong> for {t.dest}</span>}
+                <button className="toast-close" onClick={() => dismissToast(t.id)}>{"\u2715"}</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Feedback modal ── */}
+        {showFeedback && <FeedbackModal onClose={() => { setShowFeedback(false); setFeedbackSubmitted(true); }}/>}
+
+        {/* ── Feedback FAB (bottom-left) ── */}
+        {!feedbackSubmitted && !showFeedback && (
+          <button className="fab" aria-label="Share feedback" title="Share feedback" onClick={() => setShowFeedback(true)}>
+            <ChatIcon/>
+          </button>
+        )}
+
+        {/* ── Donation widget (bottom-right) ── */}
+        <DonationWidget dark={dark}/>
+
+        {/* ── Search screen ── */}
+        {screen === "search" && (
+          <div className="search-screen">
+            <button className="theme-toggle" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
+              {dark ? <SunIcon/> : <MoonIcon/>}
+            </button>
+            <div className="logo"><span className="logo-go">Go</span><span className="logo-platform">Platform</span></div>
+            <div className="tagline">Live platforms and seat guidance</div>
+            <div className="search-wrap" role="combobox" aria-expanded={showDrop} aria-haspopup="listbox">
+              <div className="search-icon"><SearchIcon/></div>
+              <input ref={inputRef} className="search-input" placeholder="Where are you departing from?"
+                value={query} onChange={e => setQuery(e.target.value)}
+                onFocus={() => { if (filtered.length) setShowDrop(true); }}
+                onBlur={() => setTimeout(() => setShowDrop(false), 200)}
+                autoComplete="off" aria-label="Search stations" role="searchbox"/>
+              {showDrop && filtered.length > 0 && (
+                <div className="dropdown" role="listbox">
+                  {filtered.map(s => (
+                    <div key={s.code} className="dropdown-item" role="option" onMouseDown={() => selectStation(s)}>
+                      <span className="dropdown-name">{s.name}</span>
+                      <span className="dropdown-code">{s.code}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {recent.length > 0 && !query && (
+              <div className="recent-section">
+                <div className="recent-label">Recent stations</div>
+                <div className="recent-list">
+                  {recent.map(s => (
+                    <div key={s.code} className="recent-btn" role="button" tabIndex={0}
+                      onClick={() => selectStation(s)} onKeyDown={e => e.key === "Enter" && selectStation(s)}>
+                      <span className="recent-name">{s.name}</span>
+                      <span className="recent-code">{s.code}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Board screen ── */}
+        {screen === "board" && (
+          <div className="board-screen">
+            <div className="board-header">
+              <div className="header-row1">
+                <button className="back-btn" onClick={goBack} aria-label="Back to search"><BackIcon/></button>
+                <span className="station-name">{station?.name}</span>
+                <span className="header-clock">{clock}</span>
+              </div>
+              <div className="header-row2">
+                <span className="header-sub">{lastUpText ? `Updated ${lastUpText}` : "Loading\u2026"}</span>
+                <div className="header-actions">
+                  <button className="live-pill" onClick={() => station && loadDepartures(station.code)} aria-label="Refresh departures">
+                    <span className="live-dot"/>LIVE
+                  </button>
+                  <button className="theme-btn-sm" onClick={() => setDark(d => !d)} aria-label="Toggle theme">
+                    {dark ? <SunIcon/> : <MoonIcon/>}
+                  </button>
+                </div>
+              </div>
+              <div className="refresh-bar"><div className="refresh-fill" style={{width:`${refreshPct}%`}}/></div>
+            </div>
+            {loading && !deps && <div className="loading-wrap"><div className="spinner"/><span style={{color:"var(--text-muted)",fontSize:14}}>Loading departures{"\u2026"}</span></div>}
+            {error && <div className="error-wrap"><div className="error-msg">Unable to load departures</div><button className="retry-btn" onClick={() => station && loadDepartures(station.code)}>Retry</button></div>}
+            {!loading && !error && deps && deps.length === 0 && <div className="empty-wrap"><div className="empty-icon">{"\uD83D\uDE89"}</div><div className="empty-text">No departures in the next hour</div></div>}
+            {deps && deps.length > 0 && (
+              <>
+                <CompactLegend/>
+                <div className="card-list" role="list" aria-label="Departures">
+                  {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs}/>)}
+                </div>
+                <div className="rtt-credit">
+                  Data provided by <a href="https://realtimetrains.co.uk" target="_blank" rel="noopener noreferrer">Realtime Trains</a>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
