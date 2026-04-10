@@ -1009,6 +1009,9 @@ export default function App() {
                 <div className="card-list" role="list" aria-label="Departures">
                   {deps.map((svc, i) => <DepartureCard key={i} svc={svc} allServices={allSvcs}/>)}
                 </div>
+                <div className="rtt-credit">
+                  Data provided by <a href="https://realtimetrains.co.uk" target="_blank" rel="noopener noreferrer">Realtime Trains</a>
+                </div>
               </>
             )}
           </div>
